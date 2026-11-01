@@ -42,3 +42,39 @@ target_link_libraries(unit_rt_tests PRIVATE
 )
 
 add_test(NAME unit_rt_tests COMMAND unit_rt_tests)
+
+# ---------------------------------------------------------------------------
+# Clang AST Frontend Plugin (libVeriObjCPlugin.so)
+# ---------------------------------------------------------------------------
+
+add_library(VeriObjCPlugin MODULE
+    compiler/src/VeriObjCPlugin.cpp
+)
+
+target_include_directories(VeriObjCPlugin PRIVATE
+    compiler/include
+    /usr/lib/llvm-23/include
+)
+
+target_compile_options(VeriObjCPlugin PRIVATE
+    -fno-rtti
+    -Wno-deprecated-this-capture
+)
+
+target_link_directories(VeriObjCPlugin PRIVATE
+    /usr/lib/llvm-23/lib
+)
+
+target_link_libraries(VeriObjCPlugin PRIVATE
+    clang-cpp
+)
+
+set_target_properties(VeriObjCPlugin PROPERTIES
+    PREFIX "lib"
+    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
+# Test target for plugin verification script
+add_test(NAME plugin_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/plugin/run_plugin_tests.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
+)

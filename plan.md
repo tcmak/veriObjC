@@ -98,15 +98,16 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 *(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 1, Tasks 1–16)*
 
 ### 2.1 AST Plugin Boilerplate & Registry
-- [ ] **Task 2.1.1: Clang 23 `PluginASTAction` Infrastructure**
-  - CMake target for `libVeriObjCPlugin.so` linked against `libclang-cpp23` and LLVM 23.
-  - Registration under `-plugin veriobjc-check`.
-  - Smoke test: Clang loads plugin without binary or ABI mismatch.
+- [x] **Task 2.1.1: Clang 23 `PluginASTAction` Infrastructure [TDD Cycle 5]**
+  - CMake target for `libVeriObjCPlugin.so` linked against `libclang-cpp` and LLVM 23 headers.
+  - Registration under `-plugin veriobjc-check` / `-add-plugin veriobjc-check`.
+  - Verified loading into Clang 23 without binary or ABI mismatch; added CTest `plugin_tests` target.
 
 ### 2.2 Strict Zero-Bypass Dynamic Feature Ban
-- [ ] **Task 2.2.1: Ban Generic `id` Type [Negative AST Tests]**
-  - Matcher for `VarDecl`, `ParmVarDecl`, `FieldDecl` with `isObjCIdType()`.
-  - Immediate fatal error and compilation halt.
+- [x] **Task 2.2.1: Ban Generic `id` Type [Negative AST Tests] [TDD Cycle 5]**
+  - AST Matchers in `VeriObjCVisitor`: intercepts `VarDecl`, `ParmVarDecl`, `FieldDecl`, and `TypedefNameDecl` using `isObjCIdType()`.
+  - Immediate fatal error and compilation halt with custom diagnostic: `"VeriObjC Violation: Banned use of generic 'id' type. Use strict nominal object typing."`.
+  - Verified across negative test suite (`test_banned_id.m`, `test_banned_id_field.m`, `test_banned_id_param.m`) and positive tests.
 - [ ] **Task 2.2.2: Ban `NSObject` Inheritance & Apple Runtime Reflection**
   - Immediate rejection of dynamic class queries, `NSClassFromString`, swizzling hooks.
 - [ ] **Task 2.2.3: Untyped Receiver Ban on `ObjCMessageExpr`**
