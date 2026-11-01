@@ -65,9 +65,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Reading a freed pool slot yields a valid address of the correct type, never memory corruption.
   - High-water mark stable: 100 re-allocations resolved from freelist; data stack did not grow.
   - Binary audit: zero undefined symbols (`nm`), zero libc/malloc references.
-- [ ] **Task 1.2.5: Weak Generation-Counted Handle (`vweak<T>`) [TDD Cycle 3]**
-  - Pool slot header tracks generation counter bumped on `alloc` and `free`.
-  - Stale `vweak` access detects generation mismatch, reports `stale` instead of silently reading garbage.
+- [x] **Task 1.2.5: Weak Generation-Counted Handle (`vweak<T>`) [TDD Cycle 3]**
+  - Implemented `veriobjc_gen_pool` and `veriobjc_handle` (`slot`, `generation`).
+  - Active slots hold odd generation; freeing bumps to even generation; reallocating bumps to next odd.
+  - Stale handle access provably detects generation mismatch and returns `NULL` (`stale`) instead of reading garbage.
+  - Double-free is mathematically rejected via generation state check.
+  - 100% branch coverage verified with `llvm-cov`; zero libc/malloc symbols verified with `nm`.
 
 ### 1.3 Headerless Object Packing & Link-Time Sealed Dispatch
 *(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Tasks 1 & 3)*

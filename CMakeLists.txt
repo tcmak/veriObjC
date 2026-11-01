@@ -26,6 +26,7 @@ add_executable(unit_rt_tests
     tests/unit_rt/main.cpp
     tests/unit_rt/TestStackAlloc.cpp
     tests/unit_rt/TestPoolAlloc.cpp
+    tests/unit_rt/TestGenPool.cpp
 )
 
 target_include_directories(unit_rt_tests PRIVATE

@@ -152,6 +152,104 @@ static inline void *veriobjc_pool_at(const struct veriobjc_pool *p, uint32_t ind
 }
 
 // ---------------------------------------------------------------------------
+// vweak / Generation-Counted Pool (vmeta §6 & vstd §3)
+//
+// Detects stale slot access instead of silently returning same-typed garbage.
+// Each slot carries an 8-byte header:
+//   - generation: uint32_t (bumped on alloc and bumped on free; odd = active, even = free)
+//   - next_free: uint32_t (freelist link when inactive)
+// ---------------------------------------------------------------------------
+
+struct veriobjc_handle {
+    uint32_t slot;
+    uint32_t generation;
+};
+
+struct veriobjc_gen_slot_header {
+    uint32_t generation;
+    uint32_t next_free;
+};
+
+struct veriobjc_gen_pool {
+    struct veriobjc_stack *backing;
+    size_t   payload_size;
+    size_t   total_slot_size;
+    uint32_t count;
+    uint32_t free_head;
+};
+
+static inline void veriobjc_gen_pool_init(struct veriobjc_gen_pool *p,
+                                          struct veriobjc_stack *s,
+                                          size_t payload_size) {
+    if (!p) { return; }
+    p->backing = s;
+    p->payload_size = payload_size;
+    size_t header_size = sizeof(struct veriobjc_gen_slot_header);
+    p->total_slot_size = header_size + veriobjc_align_up(payload_size, VERIOBJC_DEFAULT_ALIGN);
+    p->count = 0;
+    p->free_head = UINT32_MAX;
+}
+
+static inline struct veriobjc_handle veriobjc_gen_pool_alloc(struct veriobjc_gen_pool *p) {
+    struct veriobjc_handle invalid = { .slot = UINT32_MAX, .generation = 0 };
+    if (!p || !p->backing) { return invalid; }
+
+    uint32_t slot;
+    struct veriobjc_gen_slot_header *hdr;
+
+    if (p->free_head != UINT32_MAX) {
+        slot = p->free_head;
+        uint8_t *slot_ptr = p->backing->base + (size_t)slot * p->total_slot_size;
+        hdr = (struct veriobjc_gen_slot_header *)slot_ptr;
+        p->free_head = hdr->next_free;
+    } else {
+        slot = p->count;
+        void *mem = veriobjc_stack_alloc(p->backing, p->total_slot_size);
+        if (!mem) { return invalid; }
+        hdr = (struct veriobjc_gen_slot_header *)mem;
+        hdr->generation = 0;
+        p->count++;
+    }
+
+    hdr->generation++; // Active generation is odd (1, 3, 5...)
+    struct veriobjc_handle h = { .slot = slot, .generation = hdr->generation };
+    return h;
+}
+
+static inline bool veriobjc_gen_pool_is_valid(const struct veriobjc_gen_pool *p,
+                                              struct veriobjc_handle handle) {
+    if (!p || !p->backing) { return false; }
+    if (handle.slot >= p->count) { return false; }
+    uint8_t *slot_ptr = p->backing->base + (size_t)handle.slot * p->total_slot_size;
+    struct veriobjc_gen_slot_header *hdr = (struct veriobjc_gen_slot_header *)slot_ptr;
+    return (hdr->generation == handle.generation) && ((hdr->generation & 1) == 1);
+}
+
+static inline void *veriobjc_gen_pool_resolve(const struct veriobjc_gen_pool *p,
+                                              struct veriobjc_handle handle) {
+    if (!veriobjc_gen_pool_is_valid(p, handle)) {
+        return NULL;
+    }
+    uint8_t *slot_ptr = p->backing->base + (size_t)handle.slot * p->total_slot_size;
+    return (void *)(slot_ptr + sizeof(struct veriobjc_gen_slot_header));
+}
+
+static inline bool veriobjc_gen_pool_free(struct veriobjc_gen_pool *p,
+                                         struct veriobjc_handle handle) {
+    if (!p || !p->backing) { return false; }
+    if (!veriobjc_gen_pool_is_valid(p, handle)) {
+        return false; // Stale handle or double free rejected!
+    }
+    uint8_t *slot_ptr = p->backing->base + (size_t)handle.slot * p->total_slot_size;
+    struct veriobjc_gen_slot_header *hdr = (struct veriobjc_gen_slot_header *)slot_ptr;
+    hdr->generation++; // Becomes even (free)
+    hdr->next_free = p->free_head;
+    p->free_head = handle.slot;
+    return true;
+}
+
+
+// ---------------------------------------------------------------------------
 // Closed-World Object Construction Hook
 // ---------------------------------------------------------------------------
 
