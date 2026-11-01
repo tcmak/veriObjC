@@ -37,6 +37,9 @@ typedef struct veriobjc_selector *SEL;
 #define VERIOBJC_DEFAULT_ALIGN sizeof(void*)
 
 static inline size_t veriobjc_align_up(size_t n, size_t align) {
+    if (n > SIZE_MAX - (align - 1)) {
+        return SIZE_MAX;
+    }
     return (n + (align - 1)) & ~(align - 1);
 }
 
@@ -62,8 +65,15 @@ static inline size_t veriobjc_stack_available(const struct veriobjc_stack *s) {
 }
 
 static inline void *veriobjc_stack_alloc(struct veriobjc_stack *s, size_t n) {
+    if (!s) {
+        return NULL;
+    }
     size_t aligned_n = veriobjc_align_up(n, VERIOBJC_DEFAULT_ALIGN);
-    if ((size_t)(s->top - s->base) + aligned_n > s->size) {
+    if (aligned_n == SIZE_MAX) {
+        return NULL;
+    }
+    size_t used = (size_t)(s->top - s->base);
+    if (aligned_n > s->size || used > s->size - aligned_n) {
         return NULL;
     }
     uint8_t *p = s->top;

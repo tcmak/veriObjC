@@ -144,3 +144,80 @@ TEST(VeriObjC_DataStack, ObjectAllocationOnStack) {
     // Verify used space is at least instance_size
     CHECK(veriobjc_stack_used(&stack) >= dummy_class.instance_size);
 }
+
+// Contract 7: Branch Coverage & Edge Cases for veriobjc_alloc_init
+TEST(VeriObjC_DataStack, AllocInitBranchCoverageNullHandling) {
+    struct veriobjc_class dummy_class = {
+        .superclass = nullptr,
+        .name = "AudioNode",
+        .instance_size = 32
+    };
+
+    // Case 1: cls == nullptr
+    id obj_null_cls = veriobjc_alloc_init(nullptr, &stack);
+    POINTERS_EQUAL(nullptr, obj_null_cls);
+
+    // Case 2: stack == nullptr
+    id obj_null_stack = veriobjc_alloc_init(&dummy_class, nullptr);
+    POINTERS_EQUAL(nullptr, obj_null_stack);
+}
+
+TEST(VeriObjC_DataStack, AllocInitSmallInstanceSizePadded) {
+    // Instance size smaller than sizeof(struct veriobjc_object)
+    struct veriobjc_class tiny_class = {
+        .superclass = nullptr,
+        .name = "TinyNode",
+        .instance_size = 1 // Less than sizeof(struct veriobjc_object) (8 bytes)
+    };
+
+    size_t before = veriobjc_stack_used(&stack);
+    id obj = veriobjc_alloc_init(&tiny_class, &stack);
+    CHECK(obj != nullptr);
+    POINTERS_EQUAL(&tiny_class, obj->isa);
+
+    // Must have allocated at least sizeof(struct veriobjc_object)
+    size_t allocated = veriobjc_stack_used(&stack) - before;
+    CHECK(allocated >= sizeof(struct veriobjc_object));
+}
+
+TEST(VeriObjC_DataStack, AllocInitFailsWhenStackExhausted) {
+    struct veriobjc_class dummy_class = {
+        .superclass = nullptr,
+        .name = "AudioNode",
+        .instance_size = 32
+    };
+
+    // Exhaust the stack completely
+    size_t avail = veriobjc_stack_available(&stack);
+    void* p = veriobjc_stack_alloc(&stack, avail);
+    CHECK(p != nullptr);
+    LONGS_EQUAL(0, veriobjc_stack_available(&stack));
+
+    // alloc_init must fail safely and return nullptr without crash
+    id obj = veriobjc_alloc_init(&dummy_class, &stack);
+    POINTERS_EQUAL(nullptr, obj);
+}
+
+// Contract 8: Defensive Bounds and Overflow Checks
+TEST(VeriObjC_DataStack, StackAvailableWhenTopExceedsSizeDefensive) {
+    // Artificially simulate an invalid stack state where top > base + size
+    struct veriobjc_stack corrupted_stack;
+    corrupted_stack.base = buffer;
+    corrupted_stack.size = 100;
+    corrupted_stack.top = buffer + 200; // top points beyond size
+
+    LONGS_EQUAL(0, veriobjc_stack_available(&corrupted_stack));
+}
+
+TEST(VeriObjC_DataStack, AllocRejectsNullStackAndIntegerOverflow) {
+    // Null stack pointer
+    void* p_null = veriobjc_stack_alloc(nullptr, 64);
+    POINTERS_EQUAL(nullptr, p_null);
+
+    // Extreme sizes that could cause size_t integer overflow during alignment or boundary addition
+    void* p_overflow1 = veriobjc_stack_alloc(&stack, SIZE_MAX);
+    POINTERS_EQUAL(nullptr, p_overflow1);
+
+    void* p_overflow2 = veriobjc_stack_alloc(&stack, SIZE_MAX - 3);
+    POINTERS_EQUAL(nullptr, p_overflow2);
+}
