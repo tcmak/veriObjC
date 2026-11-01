@@ -8,11 +8,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Active Development — Phase 1: Micro-Runtime Core
+* **Overall Status:** Active Development — Phase 1 & Phase 2 in progress
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`/usr/bin/clang-23`)
 * **Test Framework:** CppUTest (`/home/user/cpputest`)
 * **Build System:** CMake + Make / Ninja
 * **Version Control:** Git (`main` / `master`)
+* **CLI & Build Guide:** See [`BUILDING.md`](file:///home/user/veriObjC/BUILDING.md) for command line instructions.
 
 ---
 
