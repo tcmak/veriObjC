@@ -108,10 +108,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - AST Matchers in `VeriObjCVisitor`: intercepts `VarDecl`, `ParmVarDecl`, `FieldDecl`, and `TypedefNameDecl` using `isObjCIdType()`.
   - Immediate fatal error and compilation halt with custom diagnostic: `"VeriObjC Violation: Banned use of generic 'id' type. Use strict nominal object typing."`.
   - Verified across negative test suite (`test_banned_id.m`, `test_banned_id_field.m`, `test_banned_id_param.m`) and positive tests.
-- [ ] **Task 2.2.2: Ban `NSObject` Inheritance & Apple Runtime Reflection**
-  - Immediate rejection of dynamic class queries, `NSClassFromString`, swizzling hooks.
-- [ ] **Task 2.2.3: Untyped Receiver Ban on `ObjCMessageExpr`**
-  - Demand nominal interface types on all bracketed message calls.
+- [x] **Task 2.2.2: Ban `NSObject` Inheritance & Apple Runtime Reflection [TDD Cycle 6]**
+  - AST Matcher `VisitObjCInterfaceDecl`: inspects inheritance chains; any inheritance from `NSObject` emits fatal error: `"VeriObjC Violation: Banned inheritance from 'NSObject'. VeriObjC classes are freestanding and must not inherit from the dynamic Apple runtime."`.
+  - AST Matcher `VisitCallExpr`: rejects calls to dynamic reflection and swizzling functions (`NSClassFromString`, `class_copyMethodList`, `objc_getClass`, `objc_msgSend`, `method_exchangeImplementations`).
+- [x] **Task 2.2.3: Untyped Receiver Ban on `ObjCMessageExpr` [TDD Cycle 6]**
+  - AST Matcher `VisitObjCMessageExpr`: validates `E->getReceiverInterface() != nullptr`; dynamic calls to untyped `Class` or dynamic receivers emit fatal error: `"VeriObjC Violation: Dynamic message dispatch requires an explicitly typed receiver."`.
+  - Verified across negative tests (`test_banned_nsobject.m`, `test_banned_reflection.m`, `test_banned_untyped_msg.m`) and positive class messaging test.
 
 ### 2.3 Nominal Devirtualization & Sealed Dispatch
 - [ ] **Task 2.3.1: Devirtualization of `@final` / Known Types**

@@ -3,6 +3,7 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
+#include "llvm/ADT/StringRef.h"
 
 using namespace clang;
 
@@ -50,10 +51,61 @@ public:
     }
 
     bool VisitTypedefNameDecl(TypedefNameDecl *D) {
-        // Prevent typedef id MyId;
         QualType T = D->getUnderlyingType();
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
+        }
+        return true;
+    }
+
+    // RULE 2: Ban inheritance from NSObject or any dynamic runtime root
+    bool VisitObjCInterfaceDecl(ObjCInterfaceDecl *D) {
+        for (const ObjCInterfaceDecl *Super = D->getSuperClass(); Super; Super = Super->getSuperClass()) {
+            if (Super->getName() == "NSObject") {
+                DiagnosticsEngine &Diag = Context->getDiagnostics();
+                unsigned DiagID = Diag.getCustomDiagID(
+                    DiagnosticsEngine::Error,
+                    "VeriObjC Violation: Banned inheritance from 'NSObject'. VeriObjC classes are freestanding and must not inherit from the dynamic Apple runtime."
+                );
+                Diag.Report(D->getLocation(), DiagID);
+                break;
+            }
+        }
+        return true;
+    }
+
+    // RULE 3: Ban calls to dynamic runtime reflection and swizzling functions
+    bool VisitCallExpr(CallExpr *E) {
+        const FunctionDecl *FD = E->getDirectCallee();
+        if (!FD) return true;
+
+        llvm::StringRef Name = FD->getName();
+        if (Name == "NSClassFromString" ||
+            Name == "class_copyMethodList" ||
+            Name == "objc_getClass" ||
+            Name == "objc_msgSend" ||
+            Name == "method_exchangeImplementations") {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned use of dynamic runtime reflection or swizzling function '%0'."
+            );
+            Diag.Report(E->getExprLoc(), DiagID) << Name;
+        }
+        return true;
+    }
+
+    // RULE 4: Dynamic message dispatch requires an explicitly typed receiver
+    bool VisitObjCMessageExpr(ObjCMessageExpr *E) {
+        ObjCInterfaceDecl *ReceiverClass = E->getReceiverInterface();
+        if (!ReceiverClass) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Dynamic message dispatch requires an explicitly typed receiver."
+            );
+            Diag.Report(E->getExprLoc(), DiagID);
+            return true;
         }
         return true;
     }
