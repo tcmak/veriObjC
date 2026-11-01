@@ -49,23 +49,25 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 1.1.6: Closed-World Object Construction Hook (`veriobjc_alloc_init`)**
   - Lay down `isa` and object instance memory contiguously on the data stack.
 
-### 1.2 Reusable Freelist Pools (`veriobjc_pool`) — *NEXT UP*
+### 1.2 Reusable Freelist Pools (`veriobjc_pool`)
 *(Mapped to: `docs/veriobjc-foundational-library-architecture-updated.md` §3 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
-- [ ] **Task 1.2.1: Pool Initialization over Data Stack [TDD Cycle 2A]**
+- [x] **Task 1.2.1: Pool Initialization over Data Stack [TDD Cycle 2]**
   - Backing memory tied to a `veriobjc_stack`.
   - Slot size fixed statically; initial high-water mark count = 0; free_head = `UINT32_MAX`.
-- [ ] **Task 1.2.2: Pool Allocation (`veriobjc_pool_alloc`) [TDD Cycle 2A]**
+- [x] **Task 1.2.2: Pool Allocation (`veriobjc_pool_alloc`) [TDD Cycle 2]**
   - If freelist non-empty: pop freelist head in O(1).
   - If freelist empty: bump data stack by `slot_size` and increment high-water count.
   - Zero general heap calls.
-- [ ] **Task 1.2.3: Pool Free (`veriobjc_pool_free`) [TDD Cycle 2A]**
+- [x] **Task 1.2.3: Pool Free (`veriobjc_pool_free`) [TDD Cycle 2]**
   - Push slot index onto the embedded freelist head.
   - Memory itself is never released to an OS allocator.
-- [ ] **Task 1.2.4: Same-Typed Stale Read Invariant Test [TDD Cycle 2A]**
-  - Reading a freed pool slot yields a valid instance of the correct type, never memory corruption.
-- [ ] **Task 1.2.5: Weak Generation-Counted Handle (`vweak<T>`) [TDD Cycle 2B]**
+- [x] **Task 1.2.4: Same-Typed Stale Read Invariant Test [TDD Cycle 2]**
+  - Reading a freed pool slot yields a valid address of the correct type, never memory corruption.
+  - High-water mark stable: 100 re-allocations resolved from freelist; data stack did not grow.
+  - Binary audit: zero undefined symbols (`nm`), zero libc/malloc references.
+- [ ] **Task 1.2.5: Weak Generation-Counted Handle (`vweak<T>`) [TDD Cycle 3]**
   - Pool slot header tracks generation counter bumped on `alloc` and `free`.
-  - Stale `vweak` access detects generation mismatch.
+  - Stale `vweak` access detects generation mismatch, reports `stale` instead of silently reading garbage.
 
 ### 1.3 Headerless Object Packing & Link-Time Sealed Dispatch
 *(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Tasks 1 & 3)*

@@ -87,6 +87,71 @@ static inline void veriobjc_stack_reset(struct veriobjc_stack *s, uint8_t *mark)
 }
 
 // ---------------------------------------------------------------------------
+// vpool: recycled slots over a grow-only array.
+//
+// Memory is NEVER released to an OS allocator. A freed slot is pushed onto
+// a hidden freelist encoded at the start of the slot itself (as a uint32_t
+// index). A stale hold on a slot index reads a different value of the CORRECT
+// type — a logic bug, never memory corruption.
+//
+// Allocation O(1): pop freelist head, or bump the backing data stack.
+// Free       O(1): push slot index onto the freelist head.
+// at()       O(1): base + slot_index * slot_size — bounds-checked.
+// ---------------------------------------------------------------------------
+
+struct veriobjc_pool {
+    struct veriobjc_stack *backing;  // pool storage lives on a data stack
+    size_t   slot_size;              // sizeof(T), assigned statically
+    uint32_t count;                  // high-water mark of used slots
+    uint32_t free_head;              // UINT32_MAX = empty freelist
+};
+
+static inline void veriobjc_pool_init(struct veriobjc_pool *p,
+                                      struct veriobjc_stack *s,
+                                      size_t slot_size) {
+    if (!p) { return; }
+    p->backing   = s;
+    p->slot_size = slot_size;
+    p->count     = 0;
+    p->free_head = UINT32_MAX;
+}
+
+static inline uint32_t veriobjc_pool_alloc(struct veriobjc_pool *p) {
+    if (!p) { return UINT32_MAX; }
+
+    if (p->free_head != UINT32_MAX) {
+        // Pop the freelist head: the first sizeof(uint32_t) bytes of the slot
+        // store the next free index while the slot is not in use.
+        uint32_t slot = p->free_head;
+        uint8_t *slot_ptr = p->backing->base + (size_t)slot * p->slot_size;
+        uint32_t next;
+        __builtin_memcpy(&next, slot_ptr, sizeof(uint32_t));
+        p->free_head = next;
+        return slot;
+    }
+
+    // No free slots: bump the backing data stack and return the new index.
+    veriobjc_stack_alloc(p->backing, p->slot_size);
+    return p->count++;
+}
+
+static inline void veriobjc_pool_free(struct veriobjc_pool *p, uint32_t slot) {
+    if (!p) { return; }
+    // Encode the current freelist head at the start of the slot's memory,
+    // then make this slot the new head.
+    uint8_t *slot_ptr = p->backing->base + (size_t)slot * p->slot_size;
+    __builtin_memcpy(slot_ptr, &p->free_head, sizeof(uint32_t));
+    p->free_head = slot;
+}
+
+// Returns a typed pointer to the slot at `index`, or NULL if out-of-bounds.
+static inline void *veriobjc_pool_at(const struct veriobjc_pool *p, uint32_t index) {
+    if (!p) { return NULL; }
+    if (index >= p->count) { return NULL; }
+    return (void *)(p->backing->base + (size_t)index * p->slot_size);
+}
+
+// ---------------------------------------------------------------------------
 // Closed-World Object Construction Hook
 // ---------------------------------------------------------------------------
 
