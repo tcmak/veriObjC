@@ -17,3 +17,8 @@ void* veriobjc_runtime_gen_resolve_test(struct veriobjc_gen_pool *p, struct veri
     return veriobjc_gen_pool_resolve(p, h);
 }
 
+void veriobjc_runtime_scope_guard_test(struct veriobjc_scope_guard *g) {
+    veriobjc_scope_cleanup(g);
+}
+
+

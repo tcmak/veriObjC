@@ -87,6 +87,39 @@ static inline void veriobjc_stack_reset(struct veriobjc_stack *s, uint8_t *mark)
 }
 
 // ---------------------------------------------------------------------------
+// Scoped Cleanup Hook (VeriObjC_ScopeRelease / @scoped)
+//
+// Leverages GCC/Clang __attribute__((cleanup)) to emit automatic single-store
+// resets of data-stack marks upon lexical block exit.
+// ---------------------------------------------------------------------------
+
+struct veriobjc_scope_guard {
+    struct veriobjc_stack *stack;
+    uint8_t *mark;
+};
+
+static inline void veriobjc_scope_cleanup(struct veriobjc_scope_guard *g) {
+    if (g && g->stack) {
+        veriobjc_stack_reset(g->stack, g->mark);
+    }
+}
+
+static inline void VeriObjC_ScopeRelease(void *guard_ptr) {
+    veriobjc_scope_cleanup((struct veriobjc_scope_guard *)guard_ptr);
+}
+
+#define VERIOBJC_CONCAT_INNER(a, b) a ## b
+#define VERIOBJC_CONCAT(a, b) VERIOBJC_CONCAT_INNER(a, b)
+
+#define VERIOBJC_SCOPED_STACK(s_ptr) \
+    __attribute__((cleanup(veriobjc_scope_cleanup))) \
+    struct veriobjc_scope_guard VERIOBJC_CONCAT(_v_guard_, __LINE__) = { \
+        .stack = (s_ptr), \
+        .mark = (s_ptr) ? (s_ptr)->top : NULL \
+    }
+
+
+// ---------------------------------------------------------------------------
 // vpool: recycled slots over a grow-only array.
 //
 // Memory is NEVER released to an OS allocator. A freed slot is pushed onto

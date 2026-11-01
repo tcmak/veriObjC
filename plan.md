@@ -74,13 +74,16 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ### 1.3 Headerless Object Packing & Link-Time Sealed Dispatch
 *(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Tasks 1 & 3)*
-- [ ] **Task 1.3.1: Zero-Base-Tax Object Layout Audit**
+- [x] **Task 1.3.1: Zero-Base-Tax Object Layout Audit [TDD Cycle 4]**
   - Headerless `@owned` object packing: `sizeof(Object)` matches exact sum of ivars with zero prefix metadata bytes.
+  - Polymorphic objects carry strictly `sizeof(void*)` isa pointer header.
 - [ ] **Task 1.3.2: Link-Time Perfect-Hashed Jump Table Resolver**
   - 32-bit integer selector hash resolution.
   - Conflict-free dispatch table placed in `.rodata`.
-- [ ] **Task 1.3.3: Scoped Cleanup Hook (`VeriObjC_ScopeRelease`)**
-  - `__attribute__((cleanup))` automation resetting stack windows upon block termination.
+- [x] **Task 1.3.3: Scoped Cleanup Hook (`VeriObjC_ScopeRelease` / `VERIOBJC_SCOPED_STACK`) [TDD Cycle 4]**
+  - RAII-style `__attribute__((cleanup))` automation resetting stack windows upon block termination.
+  - Nested scopes unwind deterministically in LIFO order; disassembles to a single `movq` store instruction.
+  - 100% branch and null guard coverage; zero libc symbols in `nm`.
 
 ### 1.4 Self-Relative Tape Format
 *(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Task 5)*
