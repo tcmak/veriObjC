@@ -8,7 +8,7 @@ This guide provides step-by-step instructions on how to configure, build, test, 
 
 VeriObjC requires:
 * **Clang / LLVM 23** (`clang-23`, `clang++-23`, `llvm-objdump-23`)
-* **CMake 3.20+**
+* **CMake 3.25+**
 * **Make**
 * **CppUTest** (located at `/home/user/cpputest`)
 
@@ -49,11 +49,13 @@ Runs all unit tests for the data-stack bump allocator (`veriobjc_stack`), reusab
 # Run with verbose test-by-test output
 ./build/unit_rt_tests -v
 
-# Run only a specific test group (e.g. VeriObjC_GenPool or VeriObjC_DataStack)
+# Run only a specific test group
 ./build/unit_rt_tests -sg VeriObjC_GenPool
 ./build/unit_rt_tests -sg VeriObjC_DataStack
 ./build/unit_rt_tests -sg VeriObjC_Pool
 ./build/unit_rt_tests -sg VeriObjC_ScopeAndLayout
+./build/unit_rt_tests -sg VeriObjC_Dispatch
+./build/unit_rt_tests -sg VeriObjC_TapeAndRelPtr
 ```
 
 ### 2. Clang 23 AST Plugin Test Suite (`plugin_tests`)
@@ -68,24 +70,24 @@ Executes the positive test cases and the zero-bypass negative rejection suite (v
 ## ⚡ Compiling Code with the VeriObjC Toolchain
 
 ### 1. Compiling with the Clang Plugin Activated
-To compile any Objective-C file while enforcing all VeriObjC language rules and ban filters:
+To compile any Objective-C file while enforcing all VeriObjC language rules and ban filters (e.g., our audio DSP pipeline example):
 
 ```bash
 clang-23 -Xclang -load -Xclang build/libVeriObjCPlugin.so \
          -Xclang -add-plugin -Xclang veriobjc-check \
          -I./rt/include \
-         -c your_file.m -o your_file.o
+         -c examples/audio_pipeline.m -o build/audio_pipeline.o
 ```
 
 * If the code attempts to use `id`, inherit from `NSObject`, call `NSClassFromString`, or send messages to an untyped receiver, **compilation instantly halts** with a fatal diagnostic.
 
 ### 2. Compiling Freestanding Bare-Metal Binaries (Zero Libc / Zero OS)
-To compile kernel or bare-metal modules without linking against standard OS libraries:
+To compile kernel or bare-metal modules without linking against standard OS libraries (e.g., our kernel DMA batch processor example):
 
 ```bash
 clang-23 -O2 -ffreestanding -nostdlib \
          -I./rt/include \
-         -c your_kernel.c -o your_kernel.o
+         -c examples/kernel_dma_batch.c -o build/kernel_dma_batch.o
 ```
 
 ---
@@ -122,11 +124,12 @@ To run the LLVM source-based branch coverage audit:
 
 ```bash
 # 1. Compile with profiling enabled
-clang++-23 -O0 -fprofile-instr-generate -fcoverage-mapping -std=c++20 \
-    -Irt/include -I/home/user/cpputest/include \
+clang++-23 -O0 -fprofile-instr-generate -fcoverage-mapping -std=c++26 \
+    -Irt/include -isystem /home/user/cpputest/include \
     tests/unit_rt/main.cpp tests/unit_rt/TestStackAlloc.cpp \
     tests/unit_rt/TestPoolAlloc.cpp tests/unit_rt/TestGenPool.cpp \
-    tests/unit_rt/TestScopeAndLayout.cpp \
+    tests/unit_rt/TestScopeAndLayout.cpp tests/unit_rt/TestDispatch.cpp \
+    tests/unit_rt/TestTapeAndRelPtr.cpp \
     /home/user/cpputest/cpputest_build/src/CppUTest/libCppUTest.a \
     /home/user/cpputest/cpputest_build/src/CppUTestExt/libCppUTestExt.a \
     -lpthread -o build/cov_tests

@@ -1,9 +1,9 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.25)
 project(VeriObjC LANGUAGES C CXX)
 
 set(CMAKE_C_STANDARD 23)
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -28,10 +28,15 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestPoolAlloc.cpp
     tests/unit_rt/TestGenPool.cpp
     tests/unit_rt/TestScopeAndLayout.cpp
+    tests/unit_rt/TestDispatch.cpp
+    tests/unit_rt/TestTapeAndRelPtr.cpp
 )
 
 target_include_directories(unit_rt_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
+)
+
+target_include_directories(unit_rt_tests SYSTEM PRIVATE
     ${CPPUTEST_INCLUDE_DIRS}
 )
 
@@ -53,6 +58,9 @@ add_library(VeriObjCPlugin MODULE
 
 target_include_directories(VeriObjCPlugin PRIVATE
     compiler/include
+)
+
+target_include_directories(VeriObjCPlugin SYSTEM PRIVATE
     /usr/lib/llvm-23/include
 )
 

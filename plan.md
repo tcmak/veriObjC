@@ -8,7 +8,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Active Development — Phase 1 & Phase 2 in progress
+* **Overall Status:** Phase 0 & Phase 1 Complete (100% Region, Function & Branch Coverage) — Phase 2 in progress
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`/usr/bin/clang-23`)
 * **Test Framework:** CppUTest (`/home/user/cpputest`)
 * **Build System:** CMake + Make / Ninja
@@ -23,7 +23,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Git repository initialized with appropriate `.gitignore`.
   - Directory structure created: `rt/`, `compiler/`, `vstd/`, `tests/` (`unit_rt/`, `plugin/`, `integration/`).
 - [x] **Task 0.2: Unified CMake Configuration**
-  - Configured C23 / C++20 with Clang 23.
+  - Configured C23 / C++26 with Clang 23.
   - Linked CppUTest static libraries and headers.
   - Test runner executable `unit_rt_tests` configured and running via CTest.
 
@@ -78,9 +78,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 1.3.1: Zero-Base-Tax Object Layout Audit [TDD Cycle 4]**
   - Headerless `@owned` object packing: `sizeof(Object)` matches exact sum of ivars with zero prefix metadata bytes.
   - Polymorphic objects carry strictly `sizeof(void*)` isa pointer header.
-- [ ] **Task 1.3.2: Link-Time Perfect-Hashed Jump Table Resolver**
-  - 32-bit integer selector hash resolution.
-  - Conflict-free dispatch table placed in `.rodata`.
+- [x] **Task 1.3.2: Link-Time Perfect-Hashed Jump Table Resolver [TDD Cycle 7]**
+  - 32-bit FNV-1a integer selector hash resolution (`veriobjc_sel_hash`).
+  - Conflict-free dispatch table (`veriobjc_vtable`, `veriobjc_vtable_entry`) placed in `.rodata` with O(1) `(sel_id >> shift) & mask` lookup, selector tag verification, and superclass fallback (`veriobjc_dispatch_lookup`, `veriobjc_object_dispatch`).
 - [x] **Task 1.3.3: Scoped Cleanup Hook (`VeriObjC_ScopeRelease` / `VERIOBJC_SCOPED_STACK`) [TDD Cycle 4]**
   - RAII-style `__attribute__((cleanup))` automation resetting stack windows upon block termination.
   - Nested scopes unwind deterministically in LIFO order; disassembles to a single `movq` store instruction.
@@ -88,10 +88,15 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ### 1.4 Self-Relative Tape Format
 *(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Task 5)*
-- [ ] **Task 1.4.1: Self-Relative Link Primitives (`__relative(8|16|32)`)**
-  - Narrow offset pointer encoding for position-independent structures.
-- [ ] **Task 1.4.2: Verified Framing & Loading (`to_bytes` / `from_bytes`)**
-  - Direct serialization without schemas; fuzz test corrupt bytes rejection.
+- [x] **Task 1.4.1: Self-Relative Link Primitives (`__relative(8|16|32)`) [TDD Cycle 8]**
+  - Narrow offset pointer encoding (`veriobjc_rel8`, `veriobjc_rel16`, `veriobjc_rel32`) for position-independent structures across raw `memcpy`.
+  - Range overflow checks, self-link sentinel rejection (`delta == 0`), and null safety.
+- [x] **Task 1.4.2: Verified Framing & Loading (`to_bytes` / `from_bytes`) [TDD Cycle 9]**
+  - Framed snapshot serialization (`veriobjc_tape_header`, `veriobjc_to_bytes`) and zero-copy verified loading (`veriobjc_from_bytes`) with 32-bit FNV-1a checksum and structural invariants.
+  - Exhaustive byte-by-byte mutation fuzz sweep and hostile header rejection verified in `TestTapeAndRelPtr.cpp`.
+- [x] **Task 1.4.3: Self-Relative Link Bounds & Alignment Verification (`veriobjc_verify_rel32_link`) [TDD Cycle 9]**
+  - Bounds-checked and element-alignment-checked verification of loaded `__relative(32)` links before dereference.
+  - 100.00% region (313/313), function (31/31), and branch (182/182) coverage verified via `llvm-cov-23`; zero external/libc symbols verified via `nm`.
 
 ---
 
