@@ -12,20 +12,37 @@ extern "C" {
 // ---------------------------------------------------------------------------
 
 struct veriobjc_class;
+struct veriobjc_vtable;
+
+typedef void (*veriobjc_imp_t)(void);
+
+struct veriobjc_vtable_entry {
+    uint32_t       sel_id;
+    veriobjc_imp_t imp;
+};
+
+struct veriobjc_vtable {
+    const struct veriobjc_vtable_entry *entries;
+    uint32_t mask;
+    uint8_t  shift;
+};
 
 // Structural root of all objects.
 struct veriobjc_object {
-    struct veriobjc_class *isa;
+    const struct veriobjc_class *isa;
 };
 
 struct veriobjc_class {
-    struct veriobjc_class *superclass;
-    const char *name;
-    size_t instance_size;
+    const struct veriobjc_class  *superclass;
+    const char                   *name;
+    size_t                        instance_size;
+    const struct veriobjc_vtable *vtable;
 };
 
+#ifndef __OBJC__
 typedef struct veriobjc_object *id;
-typedef struct veriobjc_class *Class;
+#endif
+typedef const struct veriobjc_class *Class;
 typedef struct veriobjc_selector *SEL;
 
 // ---------------------------------------------------------------------------
@@ -139,9 +156,7 @@ struct veriobjc_pool {
     uint32_t free_head;              // UINT32_MAX = empty freelist
 };
 
-static inline void veriobjc_pool_init(struct veriobjc_pool *p,
-                                      struct veriobjc_stack *s,
-                                      size_t slot_size) {
+static inline void veriobjc_pool_init(struct veriobjc_pool *p, struct veriobjc_stack *s, size_t slot_size) {
     if (!p) { return; }
     p->backing   = s;
     p->slot_size = slot_size;
@@ -211,9 +226,7 @@ struct veriobjc_gen_pool {
     uint32_t free_head;
 };
 
-static inline void veriobjc_gen_pool_init(struct veriobjc_gen_pool *p,
-                                          struct veriobjc_stack *s,
-                                          size_t payload_size) {
+static inline void veriobjc_gen_pool_init(struct veriobjc_gen_pool *p, struct veriobjc_stack *s, size_t payload_size) {
     if (!p) { return; }
     p->backing = s;
     p->payload_size = payload_size;
@@ -249,8 +262,7 @@ static inline struct veriobjc_handle veriobjc_gen_pool_alloc(struct veriobjc_gen
     return h;
 }
 
-static inline bool veriobjc_gen_pool_is_valid(const struct veriobjc_gen_pool *p,
-                                              struct veriobjc_handle handle) {
+static inline bool veriobjc_gen_pool_is_valid(const struct veriobjc_gen_pool *p, struct veriobjc_handle handle) {
     if (!p || !p->backing) { return false; }
     if (handle.slot >= p->count) { return false; }
     uint8_t *slot_ptr = p->backing->base + (size_t)handle.slot * p->total_slot_size;
@@ -258,8 +270,7 @@ static inline bool veriobjc_gen_pool_is_valid(const struct veriobjc_gen_pool *p,
     return (hdr->generation == handle.generation) && ((hdr->generation & 1) == 1);
 }
 
-static inline void *veriobjc_gen_pool_resolve(const struct veriobjc_gen_pool *p,
-                                              struct veriobjc_handle handle) {
+static inline void *veriobjc_gen_pool_resolve(const struct veriobjc_gen_pool *p, struct veriobjc_handle handle) {
     if (!veriobjc_gen_pool_is_valid(p, handle)) {
         return NULL;
     }
@@ -267,8 +278,7 @@ static inline void *veriobjc_gen_pool_resolve(const struct veriobjc_gen_pool *p,
     return (void *)(slot_ptr + sizeof(struct veriobjc_gen_slot_header));
 }
 
-static inline bool veriobjc_gen_pool_free(struct veriobjc_gen_pool *p,
-                                         struct veriobjc_handle handle) {
+static inline bool veriobjc_gen_pool_free(struct veriobjc_gen_pool *p, struct veriobjc_handle handle) {
     if (!p || !p->backing) { return false; }
     if (!veriobjc_gen_pool_is_valid(p, handle)) {
         return false; // Stale handle or double free rejected!
@@ -283,10 +293,50 @@ static inline bool veriobjc_gen_pool_free(struct veriobjc_gen_pool *p,
 
 
 // ---------------------------------------------------------------------------
+// Link-Time Perfect-Hashed Jump Table & Selector Hashing
+// ---------------------------------------------------------------------------
+
+static inline uint32_t veriobjc_sel_hash(const char *sel_name) {
+    if (!sel_name) {
+        return 0u;
+    }
+    uint32_t hash = 0x811c9dc5u; // FNV-1a 32-bit offset basis
+    while (*sel_name) {
+        hash ^= (uint32_t)(uint8_t)(*sel_name++);
+        hash *= 0x01000193u;     // FNV-1a 32-bit prime
+    }
+    return hash;
+}
+
+static inline veriobjc_imp_t veriobjc_dispatch_lookup(const struct veriobjc_class *cls, uint32_t sel_id) {
+    if (sel_id == 0u) {
+        return NULL;
+    }
+    for (const struct veriobjc_class *cur = cls; cur != NULL; cur = cur->superclass) {
+        const struct veriobjc_vtable *vt = cur->vtable;
+        if (vt && vt->entries) {
+            uint32_t idx = (sel_id >> vt->shift) & vt->mask;
+            const struct veriobjc_vtable_entry *entry = &vt->entries[idx];
+            if (entry->sel_id == sel_id) {
+                return entry->imp;
+            }
+        }
+    }
+    return NULL;
+}
+
+static inline veriobjc_imp_t veriobjc_object_dispatch(const struct veriobjc_object *obj, uint32_t sel_id) {
+    if (!obj) {
+        return NULL;
+    }
+    return veriobjc_dispatch_lookup(obj->isa, sel_id);
+}
+
+// ---------------------------------------------------------------------------
 // Closed-World Object Construction Hook
 // ---------------------------------------------------------------------------
 
-static inline id veriobjc_alloc_init(Class cls, struct veriobjc_stack *s) {
+static inline struct veriobjc_object *veriobjc_alloc_init(Class cls, struct veriobjc_stack *s) {
     if (!cls || !s) {
         return NULL;
     }
@@ -299,7 +349,228 @@ static inline id veriobjc_alloc_init(Class cls, struct veriobjc_stack *s) {
     if (obj) {
         obj->isa = cls;
     }
-    return (id)obj;
+    return obj;
+}
+
+// ---------------------------------------------------------------------------
+// Self-Relative Link Primitives (__relative(8|16|32))
+//
+// Narrow signed offset pointers relative to the link field's own address.
+// An offset of 0 encodes NULL; structures using self-relative links are
+// position-independent across memory, persistence, and wire buffers.
+// ---------------------------------------------------------------------------
+
+struct veriobjc_rel8  { int8_t  offset; };
+struct veriobjc_rel16 { int16_t offset; };
+struct veriobjc_rel32 { int32_t offset; };
+
+#ifndef __relative
+#define __relative(bits) struct VERIOBJC_CONCAT(veriobjc_rel, bits)
+#endif
+
+static inline bool veriobjc_rel8_set(struct veriobjc_rel8 *link, const void *target) {
+    if (!link) {
+        return false;
+    }
+    if (!target) {
+        link->offset = 0;
+        return true;
+    }
+    ptrdiff_t delta = (const uint8_t *)target - (const uint8_t *)link;
+    if (delta == 0 || delta < INT8_MIN || delta > INT8_MAX) {
+        link->offset = 0;
+        return false;
+    }
+    link->offset = (int8_t)delta;
+    return true;
+}
+
+static inline void *veriobjc_rel8_get(const struct veriobjc_rel8 *link) {
+    if (!link || link->offset == 0) {
+        return NULL;
+    }
+    return (void *)((const uint8_t *)link + link->offset);
+}
+
+static inline bool veriobjc_rel16_set(struct veriobjc_rel16 *link, const void *target) {
+    if (!link) {
+        return false;
+    }
+    if (!target) {
+        link->offset = 0;
+        return true;
+    }
+    ptrdiff_t delta = (const uint8_t *)target - (const uint8_t *)link;
+    if (delta == 0 || delta < INT16_MIN || delta > INT16_MAX) {
+        link->offset = 0;
+        return false;
+    }
+    link->offset = (int16_t)delta;
+    return true;
+}
+
+static inline void *veriobjc_rel16_get(const struct veriobjc_rel16 *link) {
+    if (!link || link->offset == 0) {
+        return NULL;
+    }
+    return (void *)((const uint8_t *)link + link->offset);
+}
+
+static inline bool veriobjc_rel32_set(struct veriobjc_rel32 *link, const void *target) {
+    if (!link) {
+        return false;
+    }
+    if (!target) {
+        link->offset = 0;
+        return true;
+    }
+    ptrdiff_t delta = (const uint8_t *)target - (const uint8_t *)link;
+    if (delta == 0 || delta < INT32_MIN || delta > INT32_MAX) {
+        link->offset = 0;
+        return false;
+    }
+    link->offset = (int32_t)delta;
+    return true;
+}
+
+static inline void *veriobjc_rel32_get(const struct veriobjc_rel32 *link) {
+    if (!link || link->offset == 0) {
+        return NULL;
+    }
+    return (void *)((const uint8_t *)link + link->offset);
+}
+
+// ---------------------------------------------------------------------------
+// Self-Relative Tape & Snapshot Framing (to_bytes / from_bytes)
+// ---------------------------------------------------------------------------
+
+#define VERIOBJC_TAPE_MAGIC   0x564F424Au // "VOBJ"
+#define VERIOBJC_TAPE_VERSION 1u
+
+struct veriobjc_tape_header {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t type_tag;
+    uint32_t elem_size;
+    uint32_t elem_count;
+    uint32_t payload_bytes;
+    uint32_t checksum;
+};
+
+static inline uint32_t veriobjc_tape_checksum(const struct veriobjc_tape_header *hdr, const uint8_t *payload, size_t payload_bytes) {
+    uint32_t hash = 0x811c9dc5u;
+    const uint8_t *hdr_bytes = (const uint8_t *)hdr;
+    size_t hdr_prefix = offsetof(struct veriobjc_tape_header, checksum);
+    for (size_t i = 0; i < hdr_prefix; ++i) {
+        hash ^= (uint32_t)hdr_bytes[i];
+        hash *= 0x01000193u;
+    }
+    for (size_t i = 0; i < payload_bytes; ++i) {
+        hash ^= (uint32_t)payload[i];
+        hash *= 0x01000193u;
+    }
+    return hash;
+}
+
+static inline size_t veriobjc_to_bytes(const void *payload, uint32_t elem_size, uint32_t elem_count, uint16_t type_tag, void *out_buf, size_t out_capacity) {
+    if (!out_buf || elem_size == 0u) {
+        return 0u;
+    }
+    if (elem_count > 0u && !payload) {
+        return 0u;
+    }
+    uint64_t total_payload = (uint64_t)elem_size * (uint64_t)elem_count;
+    if (total_payload > UINT32_MAX - sizeof(struct veriobjc_tape_header)) {
+        return 0u;
+    }
+    size_t total_frame = sizeof(struct veriobjc_tape_header) + (size_t)total_payload;
+    if (out_capacity < total_frame) {
+        return 0u;
+    }
+
+    struct veriobjc_tape_header hdr = {
+        .magic         = VERIOBJC_TAPE_MAGIC,
+        .version       = VERIOBJC_TAPE_VERSION,
+        .type_tag      = type_tag,
+        .elem_size     = elem_size,
+        .elem_count    = elem_count,
+        .payload_bytes = (uint32_t)total_payload,
+        .checksum      = 0u
+    };
+    hdr.checksum = veriobjc_tape_checksum(&hdr, (const uint8_t *)payload, (size_t)total_payload);
+
+    uint8_t *dst = (uint8_t *)out_buf;
+    __builtin_memcpy(dst, &hdr, sizeof(hdr));
+    if (total_payload > 0u) {
+        __builtin_memcpy(dst + sizeof(hdr), payload, (size_t)total_payload);
+    }
+    return total_frame;
+}
+
+static inline const void *veriobjc_from_bytes(const void *in_buf, size_t in_len, uint16_t expected_tag, uint32_t expected_elem_size, uint32_t *out_elem_count) {
+    if (!in_buf || expected_elem_size == 0u || in_len < sizeof(struct veriobjc_tape_header)) {
+        return NULL;
+    }
+
+    struct veriobjc_tape_header hdr;
+    __builtin_memcpy(&hdr, in_buf, sizeof(hdr));
+
+    if (hdr.magic != VERIOBJC_TAPE_MAGIC ||
+        hdr.version != VERIOBJC_TAPE_VERSION ||
+        hdr.type_tag != expected_tag ||
+        hdr.elem_size != expected_elem_size) {
+        return NULL;
+    }
+
+    uint64_t expected_payload = (uint64_t)hdr.elem_size * (uint64_t)hdr.elem_count;
+    if (expected_payload != (uint64_t)hdr.payload_bytes) {
+        return NULL;
+    }
+
+    if (in_len - sizeof(struct veriobjc_tape_header) != (size_t)hdr.payload_bytes) {
+        return NULL;
+    }
+
+    const uint8_t *payload = (const uint8_t *)in_buf + sizeof(struct veriobjc_tape_header);
+    uint32_t computed_crc = veriobjc_tape_checksum(&hdr, payload, (size_t)hdr.payload_bytes);
+    if (computed_crc != hdr.checksum) {
+        return NULL;
+    }
+
+    if (out_elem_count) {
+        *out_elem_count = hdr.elem_count;
+    }
+    return (const void *)payload;
+}
+
+static inline bool veriobjc_verify_rel32_link(const struct veriobjc_rel32 *link, const void *payload_base, size_t payload_bytes, size_t elem_size) {
+    if (!link || !payload_base || elem_size == 0u || payload_bytes < elem_size) {
+        return false;
+    }
+
+    const uint8_t *base = (const uint8_t *)payload_base;
+    const uint8_t *end  = base + payload_bytes;
+    const uint8_t *link_addr = (const uint8_t *)link;
+
+    if (link_addr < base || link_addr > end - sizeof(struct veriobjc_rel32)) {
+        return false;
+    }
+
+    if (link->offset == 0) {
+        return true;
+    }
+
+    ptrdiff_t link_pos = link_addr - base;
+    ptrdiff_t target_pos = link_pos + (ptrdiff_t)link->offset;
+    if (target_pos < 0 || (size_t)target_pos > payload_bytes - elem_size) {
+        return false;
+    }
+
+    if (((size_t)target_pos % elem_size) != 0u) {
+        return false;
+    }
+
+    return true;
 }
 
 #ifdef __cplusplus

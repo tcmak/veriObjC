@@ -111,4 +111,5 @@ TEST(VeriObjC_ScopeAndLayout, ScopeCleanupNullGuards) {
 
     struct veriobjc_scope_guard empty_guard = { .stack = nullptr, .mark = nullptr };
     veriobjc_scope_cleanup(&empty_guard);
+    VeriObjC_ScopeRelease(&empty_guard);
 }

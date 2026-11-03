@@ -21,4 +21,13 @@ void veriobjc_runtime_scope_guard_test(struct veriobjc_scope_guard *g) {
     veriobjc_scope_cleanup(g);
 }
 
+veriobjc_imp_t veriobjc_runtime_dispatch_test(const struct veriobjc_class *cls, uint32_t sel_id) {
+    return veriobjc_dispatch_lookup(cls, sel_id);
+}
+
+void* veriobjc_runtime_rel32_get_test(const struct veriobjc_rel32 *link) {
+    return veriobjc_rel32_get(link);
+}
+
+
 
