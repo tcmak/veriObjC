@@ -20,3 +20,4 @@ CTestTestfile.cmake
 *.swp
 *~
 *.Zone.Identifier
+*:Zone.Identifier
