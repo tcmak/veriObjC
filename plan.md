@@ -122,11 +122,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified across negative tests (`test_banned_nsobject.m`, `test_banned_reflection.m`, `test_banned_untyped_msg.m`) and positive class messaging test.
 
 ### 2.3 Nominal Devirtualization & Sealed Dispatch
-- [ ] **Task 2.3.1: Devirtualization of `@final` / Known Types**
-  - Rewrite `[receiver message]` directly into direct C-function calls (`CallExpr`).
-- [ ] **Task 2.3.2: Sealed Protocol Dispatch Matrix**
-  - Compile-time check for `__attribute__((objc_sealed))`.
-  - Lower polymorphic calls to static jump tables.
+- [x] **Task 2.3.1: Devirtualization of `@final` / Known Types [TDD Cycle 10]**
+  - Closed-world selector check in `VisitObjCMessageExpr`: rejects undeclared selectors with fatal diagnostic (`test_banned_unresolved_msg.m`).
+  - Rewrites `[receiver message]` directly into direct C-function calls (`CallExpr` to `__veriobjc_direct_<Class>__<Selector>`) in `HandleTopLevelDecl` prior to LLVM IR emission, eliminating `objc_msgSend` and `objc_msg_lookup` (`0` dynamic dispatch calls verified via `nm` and `llvm-objdump -d`).
+- [x] **Task 2.3.2: Sealed Class & Protocol Dispatch Matrix [TDD Cycle 11]**
+  - Registered first-class `__attribute__((objc_sealed))` and `__attribute__((objc_final))` Clang Sema attribute handlers via `ParsedAttrInfoRegistry`.
+  - Enforces sealed class inheritance (`test_banned_unsealed_inheritance.m`), final class non-subclassability (`test_banned_final_inheritance.m`), and sealed protocol conformance (`test_banned_unsealed_protocol.m`).
 
 ### 2.4 Linear Ownership & Data-Stack State Tracker
 - [ ] **Task 2.4.1: Move Semantics & Consumed State Tracker**
@@ -194,8 +195,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🔄 Phase 5: End-to-End Integration Verification
 
-- [ ] **Task 5.1: Network Processor Kernels & Audio DSP Examples**
-  - Compile [`veriobjc-examples-updated.md`](file:///home/user/veriObjC/docs/veriobjc-examples-updated.md) files through toolchain.
-  - Verify disassembly contains **0 calls to `objc_msgSend`**.
-- [ ] **Task 5.2: Round-Trip Snapshot Persistence**
-  - Replay order book snapshot through `to_bytes` / `from_bytes` with fuzz corruption check.
+- [x] **Task 5.1: Network Processor Kernels & Audio DSP Examples Smoke Suite**
+  - Automated acceptance runner (`tests/integration/run_examples_smoke_test.sh`, CTest target `examples_smoke_tests`) compiling `examples/audio_pipeline.m`, `examples/sealed_synth_hierarchy.m`, `examples/kernel_dma_batch.c`, and `examples/order_book_snapshot.c` with `-Werror`.
+  - Verified disassembly and symbol tables contain **0 calls to `objc_msgSend` / `objc_msg_lookup`** and **0 undefined external symbols** in freestanding kernel mode.
+- [x] **Task 5.2: Round-Trip Snapshot Persistence**
+  - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.

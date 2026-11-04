@@ -86,3 +86,8 @@ set_target_properties(VeriObjCPlugin PROPERTIES
 add_test(NAME plugin_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/plugin/run_plugin_tests.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Test target for examples smoke & acceptance suite
+add_test(NAME examples_smoke_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_examples_smoke_test.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
+)
