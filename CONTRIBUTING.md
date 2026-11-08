@@ -27,7 +27,7 @@ All implementation work follows **Red ➔ Green ➔ Refactor ➔ Audit**. No tas
 
 ## 🚫 What We Do Not Accept
 
-- **Features from the ban list.** Check [`docs/veriobjc-ban-list.md`](docs/) before proposing anything; if the construct is banned, the answer is the registry's replacement, not an exception.
+- **Features from the ban list.** Check [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) before proposing anything; if the construct is banned, the answer is the registry's replacement, not an exception.
 - **New language features without the full chain.** A feature lands only with all four: specification section, ban/registry rows for what it rejects, positive tests, and negative tests with named diagnostics.
 - **Silent broadening.** Anything that lets an `id`, an unannotated `extern fn` call from `@nolatency`, a non-flat channel payload, or a data-stack reference escape past the plugin is a correctness bug regardless of what tests pass.
 - **Unbenchmarked performance prose.** Doc changes claiming speed are rejected on sight unless they cite a benchmark ID reproducible from CI artifacts.

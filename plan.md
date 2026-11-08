@@ -2,18 +2,18 @@
 
 This living checklist tracks the complete execution of **VeriObjC (Verifiable Objective-C)** across its compiler plugin, freestanding micro-runtime (`rt/`), standard library (`vstd/`), and verification harnesses.
 
-Every implementation step follows strict **Test-Driven Development (TDD: Red ➔ Green ➔ Refactor ➔ Audit)**. Tasks are mapped directly to the specifications in [`docs/`](file:///home/user/veriObjC/docs/).
+Every implementation step follows strict **Test-Driven Development (TDD: Red ➔ Green ➔ Refactor ➔ Audit)**. Tasks are mapped directly to the specifications in [`docs/`](./docs/).
 
 ---
 
 ## 🧭 Progress Dashboard
 
 * **Overall Status:** Phase 0, Phase 1 & Phase 2 Complete (100% Region, Function & Branch Coverage on `rt/`; 100% Plugin & Examples Smoke Suites Passing)
-* **Compiler Substrate:** Clang / LLVM 23.1.5 (`/usr/bin/clang-23`)
-* **Test Framework:** CppUTest (`/home/user/cpputest`)
+* **Compiler Substrate:** Clang / LLVM 23.1.5 (`clang-23`)
+* **Test Framework:** CppUTest (`CPPUTEST_ROOT`)
 * **Build System:** CMake + Make / Ninja
 * **Version Control:** Git (`main` / `master`)
-* **CLI & Build Guide:** See [`BUILDING.md`](file:///home/user/veriObjC/BUILDING.md) for command line instructions.
+* **CLI & Build Guide:** See [`BUILDING.md`](./BUILDING.md) for command line instructions.
 
 ---
 
@@ -30,7 +30,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ---
 
 ## ⚡ Phase 1: Freestanding Closed-World Micro-Runtime (`rt/`)
-*(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 2 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
 
 ### 1.1 Data-Stack Substrate (`veriobjc_stack`)
 - [x] **Task 1.1.1: Stack Initialization & Capacity Invariants [TDD Cycle 1]**
@@ -51,7 +51,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Lay down `isa` and object instance memory contiguously on the data stack.
 
 ### 1.2 Reusable Freelist Pools (`veriobjc_pool`)
-*(Mapped to: `docs/veriobjc-foundational-library-architecture-updated.md` §3 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
+*(Mapped to: `docs/veriobjc-foundational-library.md` §3 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
 - [x] **Task 1.2.1: Pool Initialization over Data Stack [TDD Cycle 2]**
   - Backing memory tied to a `veriobjc_stack`.
   - Slot size fixed statically; initial high-water mark count = 0; free_head = `UINT32_MAX`.
@@ -74,7 +74,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - 100% branch coverage verified with `llvm-cov`; zero libc/malloc symbols verified with `nm`.
 
 ### 1.3 Headerless Object Packing & Link-Time Sealed Dispatch
-*(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Tasks 1 & 3)*
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 2, Tasks 1 & 3)*
 - [x] **Task 1.3.1: Zero-Base-Tax Object Layout Audit [TDD Cycle 4]**
   - Headerless `@owned` object packing: `sizeof(Object)` matches exact sum of ivars with zero prefix metadata bytes.
   - Polymorphic objects carry strictly `sizeof(void*)` isa pointer header.
@@ -87,7 +87,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - 100% branch and null guard coverage; zero libc symbols in `nm`.
 
 ### 1.4 Self-Relative Tape Format
-*(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 2, Task 5)*
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 2, Task 5)*
 - [x] **Task 1.4.1: Self-Relative Link Primitives (`__relative(8|16|32)`) [TDD Cycle 8]**
   - Narrow offset pointer encoding (`veriobjc_rel8`, `veriobjc_rel16`, `veriobjc_rel32`) for position-independent structures across raw `memcpy`.
   - Range overflow checks, self-link sentinel rejection (`delta == 0`), and null safety.
@@ -101,7 +101,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ---
 
 ## 🛠️ Phase 2: Clang Frontend Plugin (`compiler/`)
-*(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 1, Tasks 1–16)*
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 1, Tasks 1–16)*
 
 ### 2.1 AST Plugin Boilerplate & Registry
 - [x] **Task 2.1.1: Clang 23 `PluginASTAction` Infrastructure [TDD Cycle 5]**
@@ -217,7 +217,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ---
 
 ## 📚 Phase 3: Foundational Standard Library (`vstd/`)
-*(Mapped to: `docs/veriobjc-foundational-library-architecture-updated.md`)*
+*(Mapped to: `docs/veriobjc-foundational-library.md`)*
 
 - [ ] **Task 3.1: Text & Slices (`<vstd/string.h>`, `<vstd/span.h>`)**
   - Non-allocating `vstring_view` and contiguous `vspan<T>`.
@@ -256,7 +256,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ---
 
 ## 📊 Phase 4: Measurement, Latency CI & Verification ("No Number, No Claim")
-*(Mapped to: `docs/veriobjc-poc-execution-plan-updated.md` Module 3)*
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 3)*
 
 - [ ] **Task 4.1: Cycle-Accurate Microbenchmark Harness**
   - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0`) on isolated cores.

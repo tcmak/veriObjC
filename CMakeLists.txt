@@ -8,8 +8,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Point to CppUTest installation
-set(CPPUTEST_ROOT "/home/user/cpputest" CACHE PATH "Path to CppUTest root")
+# Point to CppUTest installation (override via -DCPPUTEST_ROOT=... or CPPUTEST_ROOT env var)
+if(DEFINED ENV{CPPUTEST_ROOT})
+    set(DEFAULT_CPPUTEST_ROOT "$ENV{CPPUTEST_ROOT}")
+else()
+    get_filename_component(DEFAULT_CPPUTEST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../cpputest" ABSOLUTE)
+endif()
+set(CPPUTEST_ROOT "${DEFAULT_CPPUTEST_ROOT}" CACHE PATH "Path to CppUTest root")
 set(CPPUTEST_INCLUDE_DIRS "${CPPUTEST_ROOT}/include")
 set(CPPUTEST_LIB "${CPPUTEST_ROOT}/cpputest_build/src/CppUTest/libCppUTest.a")
 set(CPPUTEST_EXT_LIB "${CPPUTEST_ROOT}/cpputest_build/src/CppUTestExt/libCppUTestExt.a")

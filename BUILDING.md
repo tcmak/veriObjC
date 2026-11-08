@@ -10,7 +10,7 @@ VeriObjC requires:
 * **Clang / LLVM 23** (`clang-23`, `clang++-23`, `llvm-objdump-23`)
 * **CMake 3.25+**
 * **Make**
-* **CppUTest** (located at `/home/user/cpputest`)
+* **CppUTest** (configurable via `-DCPPUTEST_ROOT=...` or `CPPUTEST_ROOT`, defaulting to `../cpputest`)
 
 Verify your environment:
 ```bash
@@ -22,7 +22,7 @@ cmake --version
 
 ## 🚀 Quick Start (Build & Test Everything)
 
-Run the following commands from the repository root (`/home/user/veriObjC`):
+Run the following commands from the repository root:
 
 ```bash
 # 1. Configure the CMake build directory
@@ -138,14 +138,15 @@ To run the LLVM source-based branch coverage audit:
 
 ```bash
 # 1. Compile with profiling enabled
+CPPUTEST_ROOT="${CPPUTEST_ROOT:-../cpputest}"
 clang++-23 -O0 -fprofile-instr-generate -fcoverage-mapping -std=c++26 \
-    -Irt/include -isystem /home/user/cpputest/include \
+    -Irt/include -isystem "$CPPUTEST_ROOT/include" \
     tests/unit_rt/main.cpp tests/unit_rt/TestStackAlloc.cpp \
     tests/unit_rt/TestPoolAlloc.cpp tests/unit_rt/TestGenPool.cpp \
     tests/unit_rt/TestScopeAndLayout.cpp tests/unit_rt/TestDispatch.cpp \
     tests/unit_rt/TestTapeAndRelPtr.cpp \
-    /home/user/cpputest/cpputest_build/src/CppUTest/libCppUTest.a \
-    /home/user/cpputest/cpputest_build/src/CppUTestExt/libCppUTestExt.a \
+    "$CPPUTEST_ROOT/cpputest_build/src/CppUTest/libCppUTest.a" \
+    "$CPPUTEST_ROOT/cpputest_build/src/CppUTestExt/libCppUTestExt.a" \
     -lpthread -o build/cov_tests
 
 # 2. Run tests to produce raw profile

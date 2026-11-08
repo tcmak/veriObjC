@@ -122,15 +122,14 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 | Document | Contents |
 | :--- | :--- |
-| [`docs/veriobjc-specification.md`](docs/) | Architectural specification: pipeline, memory model, syntax inventions |
-| [`docs/veriobjc-poc-execution-plan.md`](docs/) | PoC execution plan, language decision record, acceptance criteria |
-| [`docs/veriobjc-ban-list.md`](docs/) | Ban Registry (30 bans, diagnostics, tests) + rejection corpus rules |
-| [`docs/veriobjc-foundational-library.md`](docs/) | `vstd` design: strings, stacks, variants, channels, atomics, FFI matrix |
-| [`docs/veriobjc-advanced-substrate.md`](docs/) | vmeta metaprogramming, vregex, `veriStream` fixed-point streaming substrate |
-| [`docs/veriobjc-language-comparison.md`](docs/) | Honest dimension-by-dimension comparison vs ObjC/C++/Rust/Zig/Go |
-| [`plan.md`](docs/) | Master TDD execution checklist (this repo's living build log) |
-
-*(Adjust the `docs/` filenames to match the repository — see the plan's mapping notes.)*
+| [`docs/veriobjc-specification.md`](docs/veriobjc-specification.md) | Architectural specification: pipeline, memory model, syntax inventions |
+| [`docs/veriobjc-poc-execution-plan.md`](docs/veriobjc-poc-execution-plan.md) | PoC execution plan, language decision record, acceptance criteria |
+| [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) | Ban Registry (30 bans, diagnostics, tests) + rejection corpus rules |
+| [`docs/veriobjc-foundational-library.md`](docs/veriobjc-foundational-library.md) | `vstd` design: strings, stacks, variants, channels, atomics, FFI matrix |
+| [`docs/veriobjc-advanced-substrate.md`](docs/veriobjc-advanced-substrate.md) | vmeta metaprogramming, vregex, `veriStream` fixed-point streaming substrate |
+| [`docs/veriobjc-type-system-and-metaprogramming-vmeta.md`](docs/veriobjc-type-system-and-metaprogramming-vmeta.md) | Nominal local type inference (`auto`), constrained `vgeneric`, `vconstexpr`, `vregex` |
+| [`docs/veriobjc-language-comparison.md`](docs/veriobjc-language-comparison.md) | Honest dimension-by-dimension comparison vs ObjC/C++/Rust/Zig/Go |
+| [`plan.md`](plan.md) | Master TDD execution checklist (this repo's living build log) |
 
 ---
 
@@ -146,4 +145,5 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 - [`INSTALL.md`](INSTALL.md) — toolchain bootstrap on a fresh machine
 - [`BUILDING.md`](BUILDING.md) — toolchain setup (Clang 23, CppUTest, CMake) and CLI guide
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — TDD workflow: no task merges without its red test first
-- Backgrounds guide — "Coming to VeriObjC" from ObjC, C++, Rust, or Go
+- [`examples/EXAMPLES.md`](examples/EXAMPLES.md) — guide to positive examples and the Valid-ObjC Rejection Corpus
+- [`docs/coming-to-veriobjc-a-guide-by-programming-background.md`](docs/coming-to-veriobjc-a-guide-by-programming-background.md) — "Coming to VeriObjC" from ObjC, C++, Rust, or Go
