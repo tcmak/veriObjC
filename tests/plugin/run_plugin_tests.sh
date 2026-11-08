@@ -87,6 +87,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Uncaught multi-frame error return"
     elif [[ "$base_name" == test_banned_escaping_block* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Escaping function block is banned"
+    elif [[ "$base_name" == test_banned_unconstrained_generic* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Generic type parameter"
     fi
 
     OUTPUT=$(clang-23 -fblocks \

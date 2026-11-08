@@ -149,8 +149,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.3: Non-Escaping Function Blocks [TDD Cycle 15]**
   - Monomorphizes non-escaping `BlockExpr` closures (`^ret(args){...}`) into direct static C functions (`__veriobjc_mono_block_*`) with captured variables threaded as explicit parameters, eliminating `_NSConcreteStackBlock` and `_NSConcreteGlobalBlock` (`test_valid_function_block.m`, `examples/non_escaping_block_pipeline.m`).
   - Statically rejects escaping function blocks in global variables, struct/class fields, assignments, or return values (`test_banned_escaping_block.m`).
-- [ ] **Task 2.5.4: Constrained Generics (`vgeneric`) Definition-Site Checking**
-  - Check constraints once at definition site; prevent template explosion.
+- [x] **Task 2.5.4: Constrained Generics (`vgeneric`) Definition-Site Checking [TDD Cycle 16]**
+  - Enforces explicit sealed constraint bounds (`<T : SealedBound *>`) on all generic type parameters (`ObjCTypeParamList`) at the definition site and devirtualizes constraint method calls (`test_valid_constrained_generic.m`, `examples/constrained_generic_vault.m`).
+  - Rejects unconstrained generic parameters or unsealed constraint bounds (`test_banned_unconstrained_generic.m`).
 - [ ] **Task 2.5.5: Fueled Interpreter for `vconstexpr`**
   - Fuel counter (max steps / recursion depth); clean diagnostics on exhaustion.
 - [ ] **Task 2.5.6: Compile-Time Regex (`vregex`) to DFA in `.rodata`**

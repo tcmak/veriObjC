@@ -789,6 +789,9 @@ public:
     }
 
     bool VisitTypedefNameDecl(TypedefNameDecl *D) {
+        if (isa<ObjCTypeParamDecl>(D)) {
+            return true;
+        }
         QualType T = D->getUnderlyingType();
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
@@ -874,6 +877,31 @@ public:
                     "VeriObjC Violation: Protocol '%0' must be marked '__attribute__((objc_sealed))' for closed-world dispatch."
                 );
                 Diag.Report(Proto->getLocation(), DiagID) << Proto->getName();
+            }
+        }
+
+        if (ObjCTypeParamList *TPL = D->getTypeParamListAsWritten()) {
+            for (ObjCTypeParamDecl *TPD : *TPL) {
+                bool ValidBound = false;
+                if (TPD->hasExplicitBound()) {
+                    QualType BoundTy = TPD->getUnderlyingType();
+                    if (const auto *OPT = BoundTy->getAs<ObjCObjectPointerType>()) {
+                        if (const ObjCInterfaceDecl *BoundID = OPT->getInterfaceDecl()) {
+                            if (BoundID->getName() != "NSObject" &&
+                                (isSealedClass(BoundID) || isFinalClass(BoundID))) {
+                                ValidBound = true;
+                            }
+                        }
+                    }
+                }
+                if (!ValidBound) {
+                    DiagnosticsEngine &Diag = Context->getDiagnostics();
+                    unsigned DiagID = Diag.getCustomDiagID(
+                        DiagnosticsEngine::Error,
+                        "VeriObjC Violation: Generic type parameter '%0' on '%1' must have an explicit sealed constraint bound (unconstrained generics are banned)."
+                    );
+                    Diag.Report(TPD->getLocation(), DiagID) << TPD->getName() << D->getName();
+                }
             }
         }
         return true;
