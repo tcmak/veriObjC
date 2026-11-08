@@ -111,9 +111,8 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 | Area | State |
 | :--- | :--- |
-| **Phases 0–1** (toolchain, freestanding micro-runtime: data stacks, pools, tape/snapshots) | ✅ Complete — 100% region/function/branch coverage, audited via `llvm-cov` |
-| **Phase 2** (Clang plugin: bans, ownership tracking, lowering, FFI, vregex, `veriStream` elaboration) | 🔄 In progress — 18 TDD cycles done (Red ➔ Green ➔ Refactor ➔ Audit) |
-| **Phases 3–5** (vstd, latency CI, verification harness, FPGA zero-DSP gate) | ⬜ Planned |
+| **Phases 0–2** (toolchain, micro-runtime, Clang plugin: bans, devirtualization, lowering, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` elaboration, ban corpus ) | ✅ Complete — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov` |
+| **Phases 3–6** (vstd incl. device I/O, SIMD, contracts; latency CI, verification harness (SMACK/Z3), `vpm` & manifest, FPGA zero-DSP gate) | ⬜ Planned |
 | **Toolchain** | Clang / LLVM 23.1.5, CppUTest, CMake |
 | **Production usage** | None. This is a research bet that the *impossible list* is worth the closed world. |
 
@@ -144,6 +143,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 ## 🔗 See Also
 
+- [`INSTALL.md`](INSTALL.md) — toolchain bootstrap on a fresh machine
 - [`BUILDING.md`](BUILDING.md) — toolchain setup (Clang 23, CppUTest, CMake) and CLI guide
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — TDD workflow: no task merges without its red test first
 - Backgrounds guide — "Coming to VeriObjC" from ObjC, C++, Rust, or Go

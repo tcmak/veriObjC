@@ -189,6 +189,30 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Dual-direction gate per file (`tests/integration/run_ban_corpus_test.sh`, CTest target `ban_corpus_tests`): compiles `-Werror` clean under **stock Clang 23** *and* fails under the plugin with the exact named diagnostic.
   - Every corpus file pairs with its registry row and the ban's replacement.
 
+### 2.8 Backfill: Effect System, FFI Discipline, Reflection & Topology
+*(Mapped to: `docs/veriobjc-advanced-substrate.md` §2 & §4, the vmeta specification, `docs/veriobjc-poc-execution-plan.md` Module 1 Tasks 7/11/13/14/15, and `docs/veriobjc-ban-list.md` — spec-referenced plugin passes with no prior home in this plan. Before checking these off, verify which ones already have green tests from earlier cycles.)*
+
+- [ ] **Task 2.8.1: Effect Type System & `@nolatency` Enforcement**
+  - Effects on signatures (`@alloc`, `@io`, `@blocking`, `@fence`, `@shared-retain`); contexts `@nolatency` / `@pure`; `@cold` as the quarantine tier.
+  - Effectful call inside a `@nolatency` loop is a compile error (`test_banned_heap_nolatency.m`); `@shared` refcounting outside `@cold` is a compile error (`test_banned_shared_nolatency.m`).
+  - This is the substrate for `--effects-report` (Task 4.2) — audit whether the registry's `@nolatency` rows are backed by a real effect checker or optimistic scaffolding.
+- [ ] **Task 2.8.2: FFI Effect & Boundary Checking**
+  - `extern fn` declares effects; unannotated defaults to `@cold` and is uncallable from `@nolatency`/`@pure` contexts (`test_cold_ffi_call.m`).
+  - Flat values or opaque `vpool` handles only across the boundary; exported layouts pinned (`__packed`/`__align` + `vstatic_assert`); allocator mixing rejected (`test_ffi_stack_ref_export.m`, `test_banned_alloc_mixing.m`).
+  - `@export` functions generate a C header carrying `@pre`/`@post` as documented preconditions.
+- [ ] **Task 2.8.3: Compile-Time Reflection & SoA Transmuter**
+  - `@reflect()` field-offset computation and `__attribute__((objc_soa(Type, N)))` metadata loops lowered at compile time to flat C arrays — no runtime lookup tables.
+- [ ] **Task 2.8.4: `vvariant`/`vmatch` Exhaustiveness & `vtrait` Closed Tables**
+  - `match` lowered to link-time jump tables with compile-time exhaustiveness; adding a `vvariant` case fails every non-exhaustive `match` downstream (pairs with Task 3.5).
+  - `vtrait` closed trait tables evaluated inside the fueled interpreter (`vconstexpr` fuel applies; clean budget-exceeded errors).
+- [ ] **Task 2.8.5: Monomorphization Deduplication & Instantiation Budgets**
+  - Deduplicate instantiations program-wide by mangled key; enforce manifest-declared per-package instantiation and generated-code budgets; excess fails the build naming the package and generic. Supplies the data behind `--mono-report` (Task 4.2); depends on the manifest (Phase 6).
+- [ ] **Task 2.8.6: Static Topology & Fixed Task DAGs**
+  - Build-time core affinity, thread assignment, and NUMA placement declared in the binary layout; no runtime thread creation.
+  - Task DAGs evaluated at compile time: WCET computed as a type-level latency contract; deadlock-freedom discharged via SMACK/Z3 (feeds Task 4.4).
+  - `vasync` futures lowered to compact stack-allocated state structs, woken only by explicit hardware interrupt hooks — no polling rings.
+- [ ] **Task 2.8.7: Built-in-Place Construction Verification**
+  - `push(parse(...))` destination threading: the destination slot is threaded down as an out-parameter at the IR level; no intermediate copies for construction chains or by-value returns of growable arrays.
 
 ---
 
@@ -214,6 +238,20 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [ ] **Task 3.9: Streaming & Ternary Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
   - Packed ternary weights {-1, 0, 1} as `Bits(2)` codes, 4 per byte, `consteval` tables pinned in BRAM; weight image verified via `from_bytes` on load.
   - `ll.ml/model/` blocks: token shift (register-delayed stream), GLU mux gates, RMSNorm with power-of-two scales (shifts only), KV cache as pre-banked BRAM arena with declared `ContextCap` — overflow is a compile error (`test_banned_context_overflow.m`).
+- [ ] **Task 3.10: Freestanding Floor (`sys0/` / `ll.arch/`)**
+  - Arch-tuned `memcpy`/`memset`/`memcmp` (NEON / AVX-512 variants, non-temporal stores); custom linker-script layouts, per-core boot trampolines, TLS via `GS`/`TPIDR_EL0` — no OS interaction.
+  - MMU-as-library: page tables, huge pages, DMA-coherent regions, and Write-Back vs Write-Combining caching as distinct types; direct `rdtsc`/`CNTVCT_EL0` clock access layers.
+- [ ] **Task 3.11: Device & Real-Time Non-Blocking I/O (`<vstd/io.h>`, `hw/`)**
+  - Blocking POSIX `read`/`write` banned on constrained paths; fixed-size DMA lines registered directly with devices; direct ring-buffered streaming bound into the execution pipeline.
+  - Driver-as-library bindings plus an in-process loopback simulation transport so bare-metal network binaries run on developer machines before target flashing.
+- [ ] **Task 3.12: Lazy Execution Pipelines & `vasync` (`<vstd/execution.h>`)**
+  - P2300-style schedulers/senders/receivers as an immutable pipeline mapped on the caller's stack frame; wake-up exclusively via hardware interrupt hooks or loop bindings — no work-stealing, no polling rings.
+  - Depends on Task 2.8.6 (compile-time DAG topology, WCET contract, deadlock-freedom proof).
+- [ ] **Task 3.13: Hardware-Aware SIMD Vectorization (`<vstd/simd.h>`)**
+  - Vector width and ISA extension selection at compile time against the manifest-declared target; no raw intrinsics in user code on constrained paths.
+- [ ] **Task 3.14: Contracts Library (`<vstd/contracts.h>`)**
+  - `@pre`/`@post` library surface with postcondition-to-SMT helpers; pairs with Task 4.4 (the proof integration consumes what this emits).
+
 
 ---
 
@@ -244,3 +282,25 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
   - Compile `examples/ternary_glu_block.m` through the HLS flow (`--hw-report`); assert the synthesis report shows **0 DSP blocks** and `ternary_dot<512>` elaborates to exactly `log2(512) = 9` reduce stages with `@latency(cycles = 9)`.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
+- [ ] **Task 5.4: Vendor Synthesis Validation & RTL Equivalence**
+  - *Scope note: Task 5.3 is the plugin-emitted elaboration-level gate (the plugin refuses to emit multiplication, so its own model cannot contain DSPs). This task closes the loop with a real synthesis flow — the original spec's "post-synthesis vendor report" criterion.*
+  - Named, version-pinned synthesis toolchain (vendor HLS or open flow) invoked from CI; **DSP = 0 and BRAM weight-pinning read from the vendor utilization report**, not the plugin's self-report.
+  - Timing closure at the target clock against the declared `@latency(cycles = 9)`; C/RTL cosimulation equivalence for `examples/ternary_glu_block.m` against the C model over a test corpus.
+  - Negative test: corrupted weight tape rejected by `veriobjc_from_bytes` → kernel never loads, nothing reaches the hardware boundary.
+  - Manifest-declared LUT budget checked against the vendor's LUT count (depends on Phase 6 manifest).
+  - Acceptance: synthesis report, utilization table, and cosim log committed as reproducible artifacts; any DSP block or timing violation fails the build.
+
+---
+
+## 🧰 Phase 6: Package Manager & Manifest (`vpm`)
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` §0 — Implementation Language Decision Record)*
+
+- [ ] **Task 6.1: `vpm` Bootstrap & Content-Addressed Store**
+  - Single static Go binary; downloads, verifies, and pins the exact Clang/LLVM toolchain — `vpm` must never depend on the toolchain it provisions.
+  - Content-addressed store for artifacts (weight tapes, snapshot images) with manifest-recorded provenance (training run ID, quantization params, hash).
+- [ ] **Task 6.2: Manifest & Budget Enforcement**
+  - Manifest-declared budgets actually enforced at build time: instantiation and generated-code bytes (Task 2.8.5), `vregex` table bytes, generated-data budget, and the LUT budget (Task 2.6.3).
+  - Exceeding any budget fails the build naming the package and the offending item.
+- [ ] **Task 6.3: CI Report Publication & Diffing**
+  - `--effects-report`, `--branch-report`, `--mono-report`, and `--hw-report` published as per-build artifacts and diffed against the previous build (supplies the plumbing for Task 4.2's gates).
+  - A certified loop that gains an effect, an unproven branch, or an instantiation fails review even when all tests pass.
