@@ -28,7 +28,7 @@ trap 'rm -f "$TMP_OBJ"' EXIT
 
 for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
     echo "[RUN] Positive Test: $(basename "$pos_file")"
-    clang-23 -fblocks \
+    clang-23 -std=gnu23 -fblocks \
              -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
@@ -100,9 +100,11 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: vconstexpr evaluation"
     elif [[ "$base_name" == test_banned_backref_regex* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Banned backreference or lookaround in vregex pattern"
+    elif [[ "$base_name" == test_banned_auto_param* ]] || [[ "$base_name" == test_banned_auto_export* ]]; then
+        EXPECTED_MSG="Banned inference in signature position"
     fi
 
-    OUTPUT=$(clang-23 -fblocks \
+    OUTPUT=$(clang-23 -std=gnu23 -fblocks \
                       -Xclang -load -Xclang "$PLUGIN_PATH" \
                       -Xclang -add-plugin -Xclang veriobjc-check \
                       -I"$REPO_ROOT/rt/include" \

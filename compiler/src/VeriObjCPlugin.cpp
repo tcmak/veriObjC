@@ -1523,6 +1523,17 @@ public:
     std::vector<FunctionDecl *> &getSynthesizedDefs() { return SynthesizedDefs; }
     std::vector<Decl *> &getSynthesizedVarDefs() { return SynthesizedVarDefs; }
 
+    static bool isInferredSignatureType(QualType T) {
+        if (T.isNull()) return false;
+        if (T->getAs<AutoType>() != nullptr) return true;
+        if (const auto *RT = T->getAs<RecordType>()) {
+            if (RT->getDecl()->getName() == "__veriobjc_inferred_auto") {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // RULE 1: Intercept and BAN the generic 'id' keyword across all declarations
     bool VisitVarDecl(VarDecl *D) {
         QualType T = D->getType();
@@ -1531,6 +1542,25 @@ public:
         }
         if (T->isBlockPointerType() && D->hasGlobalStorage()) {
             reportEscapingBlock(D->getLocation());
+        }
+        if (const auto *AT = T->getAs<AutoType>()) {
+            if (const Expr *Init = D->getInit()) {
+                if (const auto *ICE = dyn_cast<ImplicitCastExpr>(Init)) {
+                    if (ICE->getCastKind() == CK_ArrayToPointerDecay) {
+                        DiagnosticsEngine &Diag = Context->getDiagnostics();
+                        unsigned DiagID = Diag.getCustomDiagID(
+                            DiagnosticsEngine::Error,
+                            "VeriObjC Violation: Implicit array-to-pointer decay is banned under 'auto' local type inference."
+                        );
+                        Diag.Report(D->getLocation(), DiagID);
+                    }
+                }
+            }
+            QualType Deduced = AT->getDeducedType();
+            if (!Deduced.isNull()) {
+                D->setType(Deduced);
+                T = Deduced;
+            }
         }
 
         if (hasVeriObjCAnnotation(D, "objc_flat")) {
@@ -1543,6 +1573,39 @@ public:
         QualType T = D->getType();
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
+        }
+        if (isInferredSignatureType(T)) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned inference in signature position: 'auto' is not permitted in function or method parameters."
+            );
+            Diag.Report(D->getLocation(), DiagID);
+        }
+        return true;
+    }
+
+    bool VisitFunctionDecl(FunctionDecl *D) {
+        if (hasVeriObjCAnnotation(D, "objc_export") && isInferredSignatureType(D->getReturnType())) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned inference in signature position: 'auto' return type is not permitted on @export functions."
+            );
+            Diag.Report(D->getLocation(), DiagID);
+        }
+        return true;
+    }
+
+    bool VisitObjCMethodDecl(ObjCMethodDecl *D) {
+        if ((isa<ObjCProtocolDecl>(D->getDeclContext()) || hasVeriObjCAnnotation(D, "objc_export")) &&
+            isInferredSignatureType(D->getReturnType())) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned inference in signature position: 'auto' return type is not permitted on protocol or @export methods."
+            );
+            Diag.Report(D->getLocation(), DiagID);
         }
         return true;
     }
@@ -2025,6 +2088,22 @@ struct ObjCVConstexprAttrInfo : public ParsedAttrInfo {
     }
 };
 
+struct ObjCExportAttrInfo : public ParsedAttrInfo {
+    ObjCExportAttrInfo() {
+        OptArgs = 0;
+        static constexpr Spelling S[] = {
+            {ParsedAttr::AS_GNU, "objc_export"},
+            {ParsedAttr::AS_C23, "objc_export"},
+            {ParsedAttr::AS_CXX11, "objc_export"}
+        };
+        Spellings = S;
+    }
+    AttrHandling handleDeclAttribute(Sema &S, Decl *D, const ParsedAttr &Attr) const override {
+        D->addAttr(AnnotateAttr::Create(S.Context, "objc_export", nullptr, 0, Attr.getRange()));
+        return AttributeApplied;
+    }
+};
+
 } // namespace
 
 
@@ -2044,6 +2123,9 @@ static ParsedAttrInfoRegistry::Add<ObjCFlatAttrInfo> AttrFlat(
 );
 static ParsedAttrInfoRegistry::Add<ObjCVConstexprAttrInfo> AttrVConstexpr(
     "objc_vconstexpr", "Mark function for fuel-bounded compile-time evaluation (vconstexpr)"
+);
+static ParsedAttrInfoRegistry::Add<ObjCExportAttrInfo> AttrExport(
+    "objc_export", "Mark VeriObjC function or method as an exported FFI boundary"
 );
 static FrontendPluginRegistry::Add<VeriObjCAction> X(
 

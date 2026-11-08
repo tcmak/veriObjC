@@ -158,9 +158,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.6: Compile-Time Regex (`vregex`) to DFA in `.rodata` [TDD Cycle 18]**
   - Implemented Thompson NFA construction, Powerset Subset Construction, and Hopcroft Equivalence-Class Minimization inside `VeriObjCPlugin.cpp` (`compileRegexToMinimizedDFA`), lowering `vregex_match(pattern, input, len)` into `.rodata` transition tables (`__veriobjc_dfa_trans_*`) and branchless O(1)-per-byte `veriobjc_dfa_match` calls (`test_valid_vregex.m`, `examples/fix_protocol_dfa_router.m`).
   - Statically rejects backreferences (`\1`..`\9`), lookaround assertions (`(?=`, `(?!`), and excessive group nesting (`test_banned_backref_regex.m`).
-- [ ] **Task 2.5.7: Nominal Local Type Inference (`auto`)**
-  - Single-pass exact nominal deduction for local `VarDecl`s: no implicit conversions, no array decay, no proxy capture; `auto &` yields a root-checked borrow (same analyzer as Task 2.4.2); `vstrong` types never unwrap under inference.
-  - Reject `auto` in function parameters (`test_banned_auto_param.m`) and in protocol/`@export` method return types (`test_banned_auto_export.m`); private/helper returns permitted.
+- [x] **Task 2.5.7: Nominal Local Type Inference (`auto`) [TDD Cycle 19]**
+  - Single-pass exact nominal deduction for local `VarDecl`s (`AutoType` resolved to concrete deduced type in AST; array-to-pointer decay rejected under `auto`; `vauto_borrow` yields root-checked borrows; `vstrong` types never unwrap under inference: `test_valid_auto_local.m`).
+  - Statically rejects `auto` / `vauto` in function/method parameters (`test_banned_auto_param.m`) and in protocol or `@export` (`veriobjc_export`) method/function return types (`test_banned_auto_export.m`).
 
 ### 2.6 Hardware Stream Elaboration (`veriStream`)
 *(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — )*

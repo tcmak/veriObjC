@@ -396,6 +396,19 @@ static inline bool __veriobjc_regex_match(const char *pattern, const char *input
     __veriobjc_regex_match((pattern_literal), (input_ptr), (input_len))
 
 // ---------------------------------------------------------------------------
+// Nominal Local Type Inference (auto / vauto) & Strong Types (vstrong)
+// ---------------------------------------------------------------------------
+
+typedef struct __veriobjc_inferred_auto {
+    int64_t __opaque;
+} vauto;
+
+#define veriobjc_export __attribute__((objc_export))
+#define vauto_borrow(var, expr) auto var = &(expr)
+#define vstrong_def(Name, UnderlyingType) \
+    typedef struct { UnderlyingType raw; } Name
+
+// ---------------------------------------------------------------------------
 // Lock-Free Single-Producer Single-Consumer Flat-Value Channel Stub
 // ---------------------------------------------------------------------------
 

@@ -30,7 +30,7 @@ for m_file in "$REPO_ROOT"/examples/*.m; do
     base_name=$(basename "$m_file")
     echo "[RUN] Objective-C Example: $base_name"
 
-    clang-23 -O2 -Werror -fblocks \
+    clang-23 -std=gnu23 -O2 -Werror -fblocks \
              -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
