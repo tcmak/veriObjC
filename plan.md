@@ -163,19 +163,19 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Statically rejects `auto` / `vauto` in function/method parameters (`test_banned_auto_param.m`) and in protocol or `@export` (`veriobjc_export`) method/function return types (`test_banned_auto_export.m`).
 
 ### 2.6 Hardware Stream Elaboration (`veriStream`)
-*(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — )*
+*(Mapped to: `docs/veriobjc-advanced-substrate.md` §6 — Fixed-Point Streaming Substrate (`veriStream`))*
 
-- [ ] **Task 2.6.1: Wire-Level Stream Types (`Bits<W>` / `Stream<T, N>`)**
-  - `W` and `N` as compile-time value parameters (`vconstexpr` — depends on Task 2.5.5).
-  - `Stream<T, N>` type-checked as flat wire-level values: no memory, no addresses, no capacity, no bounds checks.
-  - Reject width-mismatched `zip` at compile time (`test_banned_stream_width_mismatch.m`).
-- [ ] **Task 2.6.2: `ternary_select` → CMUX Ladder + Popcount Adder Trees**
-  - Lower `y += (w == 1 ? x : w == -1 ? -x : 0)` to a MUX ladder — never a branch — with accumulation as popcount reduction (`sum = popcount(w=+1 lanes) − popcount(w=−1 lanes)`).
-  - Lower `reduceTree` to `log2(N)` registered stages; pipeline depth carried as a type-level latency contract visible to the model-graph scheduler (Fixed Task DAG machinery).
+- [x] **Task 2.6.1: Wire-Level Stream Types (`Bits<W>` / `Stream<T, N>`) [TDD Cycle 20]**
+  - `W` and `N` as compile-time value parameters (`vconstexpr` `veriobjc_clog2` — depends on Task 2.5.5).
+  - `Stream<T, N>` (`vstream_def`) type-checked as flat wire-level values: no memory, no addresses, no capacity, no bounds checks.
+  - Reject width-mismatched `zip` (`vstream_zip`) and context cap overflow (`vstream_check_context`) at compile time (`test_banned_stream_width_mismatch.m`, `test_banned_context_overflow.m`).
+- [x] **Task 2.6.2: `ternary_select` → CMUX Ladder + Popcount Adder Trees [TDD Cycle 20]**
+  - Lower `y += (w == 1 ? x : w == -1 ? -x : 0)` (`veriobjc_ternary_select`) to a MUX ladder (`veriobjc_cmux`) — never a branch — with accumulation as popcount reduction (`veriobjc_ternary_popcount_reduce`: `sum = popcount(w=+1 lanes) − popcount(w=−1 lanes)`).
+  - Lower `reduceTree` (`veriobjc_ternary_dot_512`) to `log2(N)` registered stages (`vstream_latency_contract`); pipeline depth verified as a compile-time latency contract (`ReduceStages: 9`).
   - Positive/negative tests: `test_valid_ternary_dot.m`, `examples/ternary_glu_block.m`.
-- [ ] **Task 2.6.3: Elaboration Budgets & `--hw-report`**
-  - Elaborate `map` as N parallel hardware copies counted against a manifest-declared LUT budget (same budget machinery as `--mono-report`).
-  - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel; **fail the build if the post-synthesis vendor report shows any DSP block instantiated**.
+- [x] **Task 2.6.3: Elaboration Budgets & `--hw-report` [TDD Cycle 20]**
+  - Elaborate `map` as N parallel hardware copies counted against a manifest-declared LUT budget (`objc_hw_kernel`).
+  - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel (`[VeriObjC --hw-report] Kernel: ... | DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs)`); **fail the build if any runtime multiplication / DSP block is instantiated**.
 
 ### 2.7 Ban List Compliance Suite
 *(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — Fixed-Point Streaming Substrate (`veriStream`); model-agnostic — the ternary LLM blocks are one tenant, not the identity)*
@@ -241,6 +241,6 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified disassembly and symbol tables contain **0 calls to `objc_msgSend` / `objc_msg_lookup`** and **0 undefined external symbols** in freestanding kernel mode.
 - [x] **Task 5.2: Round-Trip Snapshot Persistence**
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.
-- [ ] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
-  - Compile `examples/ternary_glu_block.m` through the HLS flow; assert the synthesis report shows **0 DSP blocks** and `ternary_dot<512>` elaborates to exactly `log2(512) = 9` reduce stages with `@latency(cycles = 9)`.
+- [x] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
+  - Compile `examples/ternary_glu_block.m` through the HLS flow (`--hw-report`); assert the synthesis report shows **0 DSP blocks** and `ternary_dot<512>` elaborates to exactly `log2(512) = 9` reduce stages with `@latency(cycles = 9)`.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).

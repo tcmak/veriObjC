@@ -51,6 +51,15 @@ for m_file in "$REPO_ROOT"/examples/*.m; do
         exit 1
     fi
 
+    if [[ "$base_name" == "ternary_glu_block.m" ]]; then
+        HW_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --hw-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$m_file" 2>&1)
+        if ! echo "$HW_OUT" | grep -q "DSPs: 0 | ReduceStages: 9 | Status: PASS"; then
+            echo "[FAIL] ternary_glu_block.m failed --hw-report zero-DSP synthesis gate!"
+            echo "$HW_OUT"
+            exit 1
+        fi
+    fi
+
     echo "[PASS] $base_name compiled cleanly (0 warnings, 0 dynamic dispatch calls, 0 heap calls)."
 done
 

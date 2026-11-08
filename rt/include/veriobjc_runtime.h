@@ -409,6 +409,89 @@ typedef struct __veriobjc_inferred_auto {
     typedef struct { UnderlyingType raw; } Name
 
 // ---------------------------------------------------------------------------
+// Hardware Stream Elaboration Substrate (veriStream: Bits<W>, Stream<T, N>)
+// ---------------------------------------------------------------------------
+
+#define veriobjc_hw_kernel __attribute__((objc_hw_kernel))
+
+#define vstream_def(Name, ElemType, WidthN) \
+    __attribute__((objc_flat)) \
+    typedef struct { ElemType lanes[WidthN]; } Name
+
+__attribute__((annotate("objc_vconstexpr"))) static inline uint32_t veriobjc_clog2(uint32_t n) {
+    uint32_t stages = 0u;
+    uint32_t p = 1u;
+    while (p < n) {
+        p = p << 1u;
+        stages = stages + 1u;
+    }
+    return stages;
+}
+
+static inline int32_t veriobjc_cmux(int32_t cond_nonzero, int32_t val_true, int32_t val_false) {
+    int32_t mask = -(cond_nonzero != 0);
+    return (val_true & mask) | (val_false & ~mask);
+}
+
+static inline int32_t veriobjc_ternary_select(int8_t weight_trit, int8_t activation) {
+    int32_t x = (int32_t)activation;
+    int32_t neg_x = -x;
+    int32_t sel_neg = veriobjc_cmux(weight_trit == -1, neg_x, 0);
+    return veriobjc_cmux(weight_trit == 1, x, sel_neg);
+}
+
+static inline int32_t veriobjc_ternary_popcount_reduce(uint64_t pos_mask, uint64_t neg_mask) {
+    return __builtin_popcountll(pos_mask) - __builtin_popcountll(neg_mask);
+}
+
+static inline int32_t veriobjc_ternary_dot_512(const int8_t *activations, const uint8_t *packed_weights_128) {
+    if (!activations || !packed_weights_128) {
+        return 0;
+    }
+    int32_t acc = 0;
+    for (uint32_t byte_idx = 0u; byte_idx < 128u; ++byte_idx) {
+        uint8_t packed = packed_weights_128[byte_idx];
+        for (uint32_t sub = 0u; sub < 4u; ++sub) {
+            uint8_t code = (uint8_t)((packed >> (sub << 1u)) & 0x3u);
+            int8_t trit = (int8_t)veriobjc_cmux(code == 1u, 1, veriobjc_cmux(code == 2u, -1, 0));
+            acc += veriobjc_ternary_select(trit, activations[(byte_idx << 2u) + sub]);
+        }
+    }
+    return acc;
+}
+
+static inline int32_t veriobjc_glu_gate(int32_t gate_val, int32_t up_val) {
+    return veriobjc_cmux(gate_val > 0, up_val, 0);
+}
+
+static inline void __veriobjc_stream_zip(const void *s1, uint32_t n1, const void *s2, uint32_t n2) {
+    (void)s1;
+    (void)n1;
+    (void)s2;
+    (void)n2;
+}
+
+static inline void __veriobjc_check_context_cap(uint32_t requested_tokens, uint32_t context_cap) {
+    (void)requested_tokens;
+    (void)context_cap;
+}
+
+static inline void __veriobjc_verify_reduce_latency(uint32_t width_n, uint32_t declared_cycles) {
+    (void)width_n;
+    (void)declared_cycles;
+}
+
+#define vstream_zip(s1, s2) \
+    __veriobjc_stream_zip(&(s1), (uint32_t)(sizeof((s1).lanes) / sizeof((s1).lanes[0])), \
+                          &(s2), (uint32_t)(sizeof((s2).lanes) / sizeof((s2).lanes[0])))
+
+#define vstream_check_context(requested, cap) \
+    __veriobjc_check_context_cap((uint32_t)(requested), (uint32_t)(cap))
+
+#define vstream_latency_contract(width_n, cycles) \
+    __veriobjc_verify_reduce_latency((uint32_t)(width_n), (uint32_t)(cycles))
+
+// ---------------------------------------------------------------------------
 // Lock-Free Single-Producer Single-Consumer Flat-Value Channel Stub
 // ---------------------------------------------------------------------------
 

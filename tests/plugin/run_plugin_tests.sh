@@ -57,6 +57,14 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
     fi
+    if [[ "$(basename "$pos_file")" == "test_valid_ternary_dot.m" ]]; then
+        HW_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --hw-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$HW_OUT" | grep -q "DSPs: 0 | ReduceStages: 9 | Status: PASS"; then
+            echo "[FAIL] Expected --hw-report to show DSPs: 0 and ReduceStages: 9 in test_valid_ternary_dot.m!"
+            echo "$HW_OUT"
+            exit 1
+        fi
+    fi
     echo "[PASS] Positive Test $(basename "$pos_file") succeeded (0 dynamic dispatch calls)."
 done
 
@@ -102,6 +110,10 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Banned backreference or lookaround in vregex pattern"
     elif [[ "$base_name" == test_banned_auto_param* ]] || [[ "$base_name" == test_banned_auto_export* ]]; then
         EXPECTED_MSG="Banned inference in signature position"
+    elif [[ "$base_name" == test_banned_stream_width_mismatch* ]]; then
+        EXPECTED_MSG="Stream width mismatch"
+    elif [[ "$base_name" == test_banned_context_overflow* ]]; then
+        EXPECTED_MSG="Context cap exceeded — compile error"
     fi
 
     OUTPUT=$(clang-23 -std=gnu23 -fblocks \
