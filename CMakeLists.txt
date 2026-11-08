@@ -91,3 +91,8 @@ add_test(NAME plugin_tests
 add_test(NAME examples_smoke_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_examples_smoke_test.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Test target for dual-direction Valid-ObjC Ban Rejection Corpus
+add_test(NAME ban_corpus_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_ban_corpus_test.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
+)

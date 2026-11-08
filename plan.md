@@ -178,16 +178,16 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel (`[VeriObjC --hw-report] Kernel: ... | DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs)`); **fail the build if any runtime multiplication / DSP block is instantiated**.
 
 ### 2.7 Ban List Compliance Suite
-*(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — Fixed-Point Streaming Substrate (`veriStream`); model-agnostic — the ternary LLM blocks are one tenant, not the identity)*
+*(Mapped to: `docs/veriobjc-ban-list.md` — Centralized Ban Registry & Valid-ObjC Rejection Corpus)*
 
-- [ ] **Task 2.7.1: Centralized Ban Registry & Diagnostic Compliance Tests**
-  - Single-source ban registry (`docs/veriobjc-ban-list.md`): every banned construct mapped to its exact diagnostic string and test file (existing ✓ tests from Tasks 2.2/2.4/2.5 imported as rows; ⬜ rows added as their features land).
+- [x] **Task 2.7.1: Centralized Ban Registry & Diagnostic Compliance Tests [TDD Cycle 21]**
+  - Single-source ban registry (`docs/veriobjc-ban-list.md`): every banned construct mapped to its exact diagnostic string and test file (`tests/plugin/negative/test_*.m`).
   - Unit tests assert the **named diagnostic fires**, not merely compilation failure — diagnostic text matched per file.
   - CI gate: 100% of the registry's corpus fails under the plugin (`ban_corpus_tests`).
-- [ ] **Task 2.7.2: Valid-ObjC Rejection Corpus (`examples/banned/`)**
-  - Files of **perfectly valid stock Objective-C** that VeriObjC rejects: `id` usage, categories, swizzling, KVC/KVO, nil messaging, `@try`/`@catch`, GCD spawns, lightweight generics, escaping blocks, runtime class lookup, `performSelector:`, `@dynamic` properties.
-  - Dual-direction gate per file (`tests/integration/run_ban_corpus_test.sh`): compiles `-Werror` clean under **stock Clang 23** *and* fails under the plugin with the exact named diagnostic. A file that doesn't compile as plain ObjC is rejected from the corpus — it proves nothing.
-  - Every corpus file pairs with its registry row and the ban's replacement (id → sealed protocols; categories → overloads; KVC → `@reflect`; nil messaging → `vvariant`; `@try` → `return err from`; GCD → static topology).
+- [x] **Task 2.7.2: Valid-ObjC Rejection Corpus (`examples/banned/`) [TDD Cycle 21]**
+  - Files of **perfectly valid stock Objective-C** that VeriObjC rejects (`examples/banned/valid_objc_*.m`): `id` usage, `NSObject` inheritance, untyped messaging, nil messaging, runtime reflection, method swizzling, categories, KVC/KVO, `@dynamic` properties, `performSelector:`, lightweight generics, GCD spawns, `@try`/`@catch`, escaping blocks, and allocator mixing.
+  - Dual-direction gate per file (`tests/integration/run_ban_corpus_test.sh`, CTest target `ban_corpus_tests`): compiles `-Werror` clean under **stock Clang 23** *and* fails under the plugin with the exact named diagnostic.
+  - Every corpus file pairs with its registry row and the ban's replacement.
 
 
 ---

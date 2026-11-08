@@ -404,6 +404,8 @@ typedef struct __veriobjc_inferred_auto {
 } vauto;
 
 #define veriobjc_export __attribute__((objc_export))
+#define veriobjc_nolatency __attribute__((objc_nolatency))
+#define veriobjc_specialize __attribute__((objc_specialize))
 #define vauto_borrow(var, expr) auto var = &(expr)
 #define vstrong_def(Name, UnderlyingType) \
     typedef struct { UnderlyingType raw; } Name

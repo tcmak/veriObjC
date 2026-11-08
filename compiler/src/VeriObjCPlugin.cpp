@@ -98,7 +98,7 @@ private:
                 Pattern[i + 1] >= '1' && Pattern[i + 1] <= '9') {
                 unsigned DiagID = Diag.getCustomDiagID(
                     DiagnosticsEngine::Error,
-                    "VeriObjC Violation: Banned backreference or lookaround in vregex pattern '%0'. Rewrite as a pure regular expression for O(1)-per-byte DFA execution."
+                    "VeriObjC Violation: No DFA can exist for this pattern: Banned backreference or lookaround in vregex pattern '%0'. Rewrite as a pure regular expression for O(1)-per-byte DFA execution."
                 );
                 Diag.Report(Loc, DiagID) << Pattern;
                 return false;
@@ -106,7 +106,7 @@ private:
             if (Pattern[i] == '(' && i + 1 < Pattern.size() && Pattern[i + 1] == '?') {
                 unsigned DiagID = Diag.getCustomDiagID(
                     DiagnosticsEngine::Error,
-                    "VeriObjC Violation: Banned backreference or lookaround in vregex pattern '%0'. Rewrite as a pure regular expression for O(1)-per-byte DFA execution."
+                    "VeriObjC Violation: No DFA can exist for this pattern: Banned backreference or lookaround in vregex pattern '%0'. Rewrite as a pure regular expression for O(1)-per-byte DFA execution."
                 );
                 Diag.Report(Loc, DiagID) << Pattern;
                 return false;
@@ -385,6 +385,15 @@ private:
                 ClassOf = std::move(NewClassOf);
                 Changed = true;
             }
+        }
+
+        if (NumClasses * 256u > 4096u) {
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Byte budget exceeded for vregex pattern '%0' (%1 states, %2 bytes exceeds 4096-byte DFA table budget)."
+            );
+            Diag.Report(Loc, DiagID) << Pattern << NumClasses << (NumClasses * 256u);
+            return false;
         }
 
         OutDFA.NumStates = NumClasses;
@@ -800,7 +809,7 @@ private:
         DiagnosticsEngine &Diag = Context->getDiagnostics();
         unsigned DiagID = Diag.getCustomDiagID(
             DiagnosticsEngine::Error,
-            "VeriObjC Violation: Escaping function block is banned. Function blocks must be non-escaping and monomorphized at compile time."
+            "VeriObjC Violation: Banned escaping function block: Escaping function block is banned. Function blocks must be non-escaping and monomorphized at compile time."
         );
         Diag.Report(Loc, DiagID);
     }
@@ -973,6 +982,34 @@ private:
                             "VeriObjC Violation: Escaping data-stack reference '%0' assigned to outer destination '%1' that outlives its root scope."
                         );
                         Diag.Report(BO->getExprLoc(), DiagID) << SrcName << DstVD->getName();
+                    }
+                }
+            }
+        }
+
+        if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
+                bool IsRuntimeHelper = Context->getSourceManager().getFilename(CalleeFD->getLocation()).ends_with("veriobjc_runtime.h");
+                if (!CalleeFD->hasBody() && !IsRuntimeHelper) {
+                    for (unsigned i = 0; i < CE->getNumArgs(); ++i) {
+                        const Expr *Arg = CE->getArg(i);
+                        if (const VarDecl *ArgVD = extractVarDecl(Arg)) {
+                            if (StackRootDepth.contains(ArgVD)) {
+                                DiagnosticsEngine &Diag = Context->getDiagnostics();
+                                unsigned DiagID = Diag.getCustomDiagID(
+                                    DiagnosticsEngine::Error,
+                                    "VeriObjC Violation: Banned cross-boundary ownership: data-stack reference '%0' cannot cross an FFI boundary."
+                                );
+                                Diag.Report(Arg->getExprLoc(), DiagID) << ArgVD->getName();
+                            }
+                        } else if (isStackAllocExpr(Arg)) {
+                            DiagnosticsEngine &Diag = Context->getDiagnostics();
+                            unsigned DiagID = Diag.getCustomDiagID(
+                                DiagnosticsEngine::Error,
+                                "VeriObjC Violation: Banned cross-boundary ownership: data-stack reference cannot cross an FFI boundary."
+                            );
+                            Diag.Report(Arg->getExprLoc(), DiagID);
+                        }
                     }
                 }
             }
@@ -1545,12 +1582,32 @@ public:
         return false;
     }
 
+    void checkLightweightGenerics(QualType T, SourceLocation Loc) {
+        if (T.isNull()) return;
+        if (const auto *OPT = T->getAs<ObjCObjectPointerType>()) {
+            if (!OPT->getTypeArgsAsWritten().empty()) {
+                if (const ObjCInterfaceDecl *ID = OPT->getInterfaceDecl()) {
+                    if (ID->getName() == "NSArray" || ID->getName() == "NSDictionary" ||
+                        ID->getName() == "NSSet" || (!isSealedClass(ID) && !isFinalClass(ID))) {
+                        DiagnosticsEngine &Diag = Context->getDiagnostics();
+                        unsigned DiagID = Diag.getCustomDiagID(
+                            DiagnosticsEngine::Error,
+                            "VeriObjC Violation: Banned erased generic hints: lightweight generic specialization on '%0' is type-erased; use constrained vgeneric."
+                        );
+                        Diag.Report(Loc, DiagID) << ID->getName();
+                    }
+                }
+            }
+        }
+    }
+
     // RULE 1: Intercept and BAN the generic 'id' keyword across all declarations
     bool VisitVarDecl(VarDecl *D) {
         QualType T = D->getType();
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
         }
+        checkLightweightGenerics(T, D->getLocation());
         if (T->isBlockPointerType() && D->hasGlobalStorage()) {
             reportEscapingBlock(D->getLocation());
         }
@@ -1585,6 +1642,7 @@ public:
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
         }
+        checkLightweightGenerics(T, D->getLocation());
         if (isInferredSignatureType(T)) {
             DiagnosticsEngine &Diag = Context->getDiagnostics();
             unsigned DiagID = Diag.getCustomDiagID(
@@ -1597,6 +1655,14 @@ public:
     }
 
     bool VisitFunctionDecl(FunctionDecl *D) {
+        if (hasVeriObjCAnnotation(D, "objc_specialize")) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned specialization/probing: ad-hoc generic specialization or SFINAE probing is forbidden; use explicit 'where' constraints."
+            );
+            Diag.Report(D->getLocation(), DiagID);
+        }
         if (hasVeriObjCAnnotation(D, "objc_export") && isInferredSignatureType(D->getReturnType())) {
             DiagnosticsEngine &Diag = Context->getDiagnostics();
             unsigned DiagID = Diag.getCustomDiagID(
@@ -1604,6 +1670,50 @@ public:
                 "VeriObjC Violation: Banned inference in signature position: 'auto' return type is not permitted on @export functions."
             );
             Diag.Report(D->getLocation(), DiagID);
+        }
+        return true;
+    }
+
+    bool VisitObjCCategoryDecl(ObjCCategoryDecl *D) {
+        DiagnosticsEngine &Diag = Context->getDiagnostics();
+        unsigned DiagID = Diag.getCustomDiagID(
+            DiagnosticsEngine::Error,
+            "VeriObjC Violation: Banned categories: Objective-C category '%0' violates closed-world dispatch."
+        );
+        Diag.Report(D->getLocation(), DiagID) << D->getName();
+        return true;
+    }
+
+    bool VisitObjCPropertyImplDecl(ObjCPropertyImplDecl *D) {
+        if (D->getPropertyImplementation() == ObjCPropertyImplDecl::Dynamic) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned dynamic property synthesis: '@dynamic' properties are forbidden in closed-world VeriObjC."
+            );
+            Diag.Report(D->getLocation(), DiagID);
+        }
+        return true;
+    }
+
+    bool VisitObjCAtTryStmt(ObjCAtTryStmt *S) {
+        DiagnosticsEngine &Diag = Context->getDiagnostics();
+        unsigned DiagID = Diag.getCustomDiagID(
+            DiagnosticsEngine::Error,
+            "VeriObjC Violation: Banned exception unwinding: '@try/@catch/@throw' DWARF unwinding is forbidden; use 'return err from f'."
+        );
+        Diag.Report(S->getAtTryLoc(), DiagID);
+        return true;
+    }
+
+    bool VisitStmtExpr(StmtExpr *E) {
+        if (!Context->getSourceManager().isInSystemHeader(E->getBeginLoc())) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned computation macro: preprocessor statement-expression codegen is forbidden; use vconstexpr."
+            );
+            Diag.Report(E->getBeginLoc(), DiagID);
         }
         return true;
     }
@@ -1776,14 +1886,40 @@ public:
         if (Name == "NSClassFromString" ||
             Name == "class_copyMethodList" ||
             Name == "objc_getClass" ||
-            Name == "objc_msgSend" ||
-            Name == "method_exchangeImplementations") {
+            Name == "objc_msgSend") {
             DiagnosticsEngine &Diag = Context->getDiagnostics();
             unsigned DiagID = Diag.getCustomDiagID(
                 DiagnosticsEngine::Error,
-                "VeriObjC Violation: Banned use of dynamic runtime reflection or swizzling function '%0'."
+                "VeriObjC Violation: Banned Apple runtime reflection: Banned use of dynamic runtime reflection or swizzling function '%0'."
             );
-
+            Diag.Report(E->getExprLoc(), DiagID) << Name;
+        } else if (Name == "method_exchangeImplementations" || Name == "class_replaceMethod") {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned runtime method surgery: Banned use of dynamic runtime reflection or swizzling function '%0'."
+            );
+            Diag.Report(E->getExprLoc(), DiagID) << Name;
+        } else if (Name == "dispatch_async" || Name == "pthread_create") {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned runtime scheduling on constrained paths: '%0' spawns dynamic threads or queues."
+            );
+            Diag.Report(E->getExprLoc(), DiagID) << Name;
+        } else if (Name == "free") {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned allocator mixing: C heap 'free' cannot be mixed with VeriObjC arenas or pools."
+            );
+            Diag.Report(E->getExprLoc(), DiagID);
+        } else if (Name == "malloc" || Name == "calloc" || Name == "realloc") {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: @alloc not permitted in @nolatency context: heap allocation '%0' is banned."
+            );
             Diag.Report(E->getExprLoc(), DiagID) << Name;
         } else if (Name == "veriobjc_channel_send" && E->getNumArgs() >= 2) {
             QualType ArgTy = E->getArg(1)->IgnoreParenCasts()->getType();
@@ -1856,6 +1992,49 @@ public:
 
     // RULE 4: Dynamic message dispatch requires an explicitly typed receiver and resolved method
     bool VisitObjCMessageExpr(ObjCMessageExpr *E) {
+        if (const Expr *Recv = E->getInstanceReceiver()) {
+            const Expr *StrippedRecv = Recv->IgnoreParenImpCasts();
+            if (StrippedRecv->isNullPointerConstant(*Context, Expr::NPC_ValueDependentIsNull) != Expr::NPCK_NotNull ||
+                Recv->getType()->getNullability() == NullabilityKind::Nullable) {
+                DiagnosticsEngine &Diag = Context->getDiagnostics();
+                unsigned DiagID = Diag.getCustomDiagID(
+                    DiagnosticsEngine::Error,
+                    "VeriObjC Violation: Banned nil messaging on unproven pointer; prove non-null or use vvariant."
+                );
+                Diag.Report(E->getExprLoc(), DiagID);
+                return true;
+            }
+        }
+
+        std::string SelStr = E->getSelector().getAsString();
+        if (SelStr == "setValue:forKey:" || SelStr == "valueForKey:" || llvm::StringRef(SelStr).starts_with("addObserver:")) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned key-value coding/observation: selector '%0' requires dynamic runtime introspection."
+            );
+            Diag.Report(E->getSelectorStartLoc(), DiagID) << SelStr;
+            return true;
+        }
+        if (llvm::StringRef(SelStr).starts_with("performSelector:")) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned deferred dynamic dispatch: '%0' cannot be statically resolved."
+            );
+            Diag.Report(E->getSelectorStartLoc(), DiagID) << SelStr;
+            return true;
+        }
+        if (llvm::StringRef(SelStr).starts_with("detachNewThreadSelector:")) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Banned runtime scheduling on constrained paths: '%0' spawns dynamic threads."
+            );
+            Diag.Report(E->getSelectorStartLoc(), DiagID) << SelStr;
+            return true;
+        }
+
         ObjCInterfaceDecl *ReceiverClass = E->getReceiverInterface();
         if (!ReceiverClass) {
             DiagnosticsEngine &Diag = Context->getDiagnostics();
@@ -1897,6 +2076,30 @@ public:
         }
     }
 
+    void verifyNoLatencyCalls(const Stmt *S, const FunctionDecl *CallerFD) {
+        if (!S || !CallerFD) return;
+        if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
+                llvm::StringRef Name = CalleeFD->getName();
+                if (Name == "malloc" || Name == "calloc" || Name == "realloc") {
+                    return; // Already reported by VisitCallExpr
+                }
+                bool IsRuntimeHelper = Context->getSourceManager().getFilename(CalleeFD->getLocation()).ends_with("veriobjc_runtime.h");
+                if (!CalleeFD->hasBody() && !IsRuntimeHelper && !hasVeriObjCAnnotation(CalleeFD, "objc_nolatency")) {
+                    DiagnosticsEngine &Diag = Context->getDiagnostics();
+                    unsigned DiagID = Diag.getCustomDiagID(
+                        DiagnosticsEngine::Error,
+                        "VeriObjC Violation: Unannotated extern function '%0' defaults to @cold and cannot be called from a @nolatency context."
+                    );
+                    Diag.Report(CE->getExprLoc(), DiagID) << Name;
+                }
+            }
+        }
+        for (const Stmt *Child : S->children()) {
+            verifyNoLatencyCalls(Child, CallerFD);
+        }
+    }
+
     void lowerTopLevelDecl(Decl *D) {
         if (!D || Context->getDiagnostics().hasErrorOccurred()) {
             return;
@@ -1907,6 +2110,9 @@ public:
 
         if (auto *FD = dyn_cast<FunctionDecl>(D)) {
             if (FD->hasBody()) {
+                if (hasVeriObjCAnnotation(FD, "objc_nolatency")) {
+                    verifyNoLatencyCalls(FD->getBody(), FD);
+                }
                 collectErrorReturnGraph(FD->getBody(), FD->getCanonicalDecl());
                 llvm::DenseSet<const VarDecl *> MovedVars;
                 llvm::DenseSet<const VarDecl *> FreedVars;
@@ -2235,6 +2441,38 @@ struct ObjCHwKernelAttrInfo : public ParsedAttrInfo {
     }
 };
 
+struct ObjCNolatencyAttrInfo : public ParsedAttrInfo {
+    ObjCNolatencyAttrInfo() {
+        OptArgs = 0;
+        static constexpr Spelling S[] = {
+            {ParsedAttr::AS_GNU, "objc_nolatency"},
+            {ParsedAttr::AS_C23, "objc_nolatency"},
+            {ParsedAttr::AS_CXX11, "objc_nolatency"}
+        };
+        Spellings = S;
+    }
+    AttrHandling handleDeclAttribute(Sema &S, Decl *D, const ParsedAttr &Attr) const override {
+        D->addAttr(AnnotateAttr::Create(S.Context, "objc_nolatency", nullptr, 0, Attr.getRange()));
+        return AttributeApplied;
+    }
+};
+
+struct ObjCSpecializeAttrInfo : public ParsedAttrInfo {
+    ObjCSpecializeAttrInfo() {
+        OptArgs = 0;
+        static constexpr Spelling S[] = {
+            {ParsedAttr::AS_GNU, "objc_specialize"},
+            {ParsedAttr::AS_C23, "objc_specialize"},
+            {ParsedAttr::AS_CXX11, "objc_specialize"}
+        };
+        Spellings = S;
+    }
+    AttrHandling handleDeclAttribute(Sema &S, Decl *D, const ParsedAttr &Attr) const override {
+        D->addAttr(AnnotateAttr::Create(S.Context, "objc_specialize", nullptr, 0, Attr.getRange()));
+        return AttributeApplied;
+    }
+};
+
 } // namespace
 
 
@@ -2260,6 +2498,12 @@ static ParsedAttrInfoRegistry::Add<ObjCExportAttrInfo> AttrExport(
 );
 static ParsedAttrInfoRegistry::Add<ObjCHwKernelAttrInfo> AttrHwKernel(
     "objc_hw_kernel", "Mark VeriObjC function as a synthesizable veriStream hardware kernel"
+);
+static ParsedAttrInfoRegistry::Add<ObjCNolatencyAttrInfo> AttrNolatency(
+    "objc_nolatency", "Mark VeriObjC function as a zero-allocation, non-blocking @nolatency path"
+);
+static ParsedAttrInfoRegistry::Add<ObjCSpecializeAttrInfo> AttrSpecialize(
+    "objc_specialize", "Detect banned ad-hoc generic specialization / SFINAE probing"
 );
 static FrontendPluginRegistry::Add<VeriObjCAction> X(
 

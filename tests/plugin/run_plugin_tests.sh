@@ -79,7 +79,7 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
     elif [[ "$base_name" == test_banned_nsobject* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Banned inheritance from 'NSObject'"
     elif [[ "$base_name" == test_banned_reflection* ]]; then
-        EXPECTED_MSG="VeriObjC Violation: Banned use of dynamic runtime reflection"
+        EXPECTED_MSG="Banned use of dynamic runtime reflection"
     elif [[ "$base_name" == test_banned_untyped_msg* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Dynamic message dispatch requires an explicitly typed receiver"
     elif [[ "$base_name" == test_banned_unresolved_msg* ]]; then
@@ -101,22 +101,54 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
     elif [[ "$base_name" == test_banned_uncaught_err_from* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Uncaught multi-frame error return"
     elif [[ "$base_name" == test_banned_escaping_block* ]]; then
-        EXPECTED_MSG="VeriObjC Violation: Escaping function block is banned"
+        EXPECTED_MSG="Escaping function block is banned"
     elif [[ "$base_name" == test_banned_unconstrained_generic* ]]; then
-        EXPECTED_MSG="VeriObjC Violation: Generic type parameter"
+        EXPECTED_MSG="Generic type parameter"
     elif [[ "$base_name" == test_banned_vconstexpr_fuel* ]]; then
-        EXPECTED_MSG="VeriObjC Violation: vconstexpr evaluation"
+        EXPECTED_MSG="vconstexpr evaluation"
     elif [[ "$base_name" == test_banned_backref_regex* ]]; then
-        EXPECTED_MSG="VeriObjC Violation: Banned backreference or lookaround in vregex pattern"
+        EXPECTED_MSG="Banned backreference or lookaround in vregex pattern"
     elif [[ "$base_name" == test_banned_auto_param* ]] || [[ "$base_name" == test_banned_auto_export* ]]; then
         EXPECTED_MSG="Banned inference in signature position"
     elif [[ "$base_name" == test_banned_stream_width_mismatch* ]]; then
         EXPECTED_MSG="Stream width mismatch"
     elif [[ "$base_name" == test_banned_context_overflow* ]]; then
         EXPECTED_MSG="Context cap exceeded — compile error"
+    elif [[ "$base_name" == test_banned_nil_msg* ]]; then
+        EXPECTED_MSG="Banned nil messaging on unproven pointer"
+    elif [[ "$base_name" == test_banned_swizzling* ]]; then
+        EXPECTED_MSG="Banned runtime method surgery"
+    elif [[ "$base_name" == test_banned_category* ]]; then
+        EXPECTED_MSG="Banned categories"
+    elif [[ "$base_name" == test_banned_kvc* ]]; then
+        EXPECTED_MSG="Banned key-value coding/observation"
+    elif [[ "$base_name" == test_banned_dynamic_prop* ]]; then
+        EXPECTED_MSG="Banned dynamic property synthesis"
+    elif [[ "$base_name" == test_banned_perform_selector* ]]; then
+        EXPECTED_MSG="Banned deferred dynamic dispatch"
+    elif [[ "$base_name" == test_banned_nsarray_generics* ]]; then
+        EXPECTED_MSG="Banned erased generic hints"
+    elif [[ "$base_name" == test_banned_runtime_spawn* ]]; then
+        EXPECTED_MSG="Banned runtime scheduling on constrained paths"
+    elif [[ "$base_name" == test_banned_try_catch* ]]; then
+        EXPECTED_MSG="Banned exception unwinding"
+    elif [[ "$base_name" == test_banned_heap_nolatency* ]]; then
+        EXPECTED_MSG="@alloc not permitted in @nolatency context"
+    elif [[ "$base_name" == test_cold_ffi_call* ]]; then
+        EXPECTED_MSG="defaults to @cold"
+    elif [[ "$base_name" == test_ffi_stack_ref_export* ]]; then
+        EXPECTED_MSG="Banned cross-boundary ownership"
+    elif [[ "$base_name" == test_banned_alloc_mixing* ]]; then
+        EXPECTED_MSG="Banned allocator mixing"
+    elif [[ "$base_name" == test_banned_specialization* ]]; then
+        EXPECTED_MSG="Banned specialization/probing"
+    elif [[ "$base_name" == test_banned_computation_macro* ]]; then
+        EXPECTED_MSG="Banned computation macro"
+    elif [[ "$base_name" == test_regex_state_explosion* ]]; then
+        EXPECTED_MSG="Byte budget exceeded"
     fi
 
-    OUTPUT=$(clang-23 -std=gnu23 -fblocks \
+    OUTPUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions \
                       -Xclang -load -Xclang "$PLUGIN_PATH" \
                       -Xclang -add-plugin -Xclang veriobjc-check \
                       -I"$REPO_ROOT/rt/include" \

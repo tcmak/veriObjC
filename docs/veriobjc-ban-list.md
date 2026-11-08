@@ -15,51 +15,51 @@ Two artifacts, both CI gates:
 
 | Banned construct | Valid ObjC? | Diagnostic (key phrase) | VeriObjC replacement | Test |
 | :--- | :--- | :--- | :--- | :--- |
-| `id` in any declaration | Yes | "Banned use of generic 'id' type" | Sealed protocols, concrete nominal types | `test_banned_id.m` (+ field/param) ✓ |
-| `NSObject` inheritance | Yes | "Banned inheritance from 'NSObject'" | `@owned` freestanding classes | `test_banned_nsobject.m` ✓ |
-| Untyped / dynamic receiver messaging | Yes | "Dynamic message dispatch requires an explicitly typed receiver" | Nominal devirtualization | `test_banned_untyped_msg.m` ✓ |
-| Messaging nil on unproven pointers | Yes (returns nil) | "Banned nil messaging on unproven pointer" | `vvariant` for absence; proven-null via contracts | `test_banned_nil_msg.m` ⬜ |
-| Runtime reflection (`NSClassFromString`, `objc_getClass`, `class_copyMethodList`) | Yes | "Banned Apple runtime reflection" | `@reflect()` at compile time | `test_banned_reflection.m` ✓ |
-| Method swizzling (`method_exchangeImplementations`) | Yes | "Banned runtime method surgery" | None — method tables are immutable and link-time hashed | `test_banned_swizzling.m` ⬜ |
-| Categories | Yes | "Banned categories" | Method overloads + sealed protocols | `test_banned_category.m` ⬜ |
-| KVC / KVO (`setValue:forKey:`, `addObserver:`) | Yes | "Banned key-value coding/observation" | `@reflect` offsets; `vweak` observation | `test_banned_kvc.m` ⬜ |
-| `@dynamic` properties / dynamic method resolution | Yes | "Banned dynamic property synthesis" | Checked, packed `@owned` ivars | `test_banned_dynamic_prop.m` ⬜ |
-| `performSelector:` / `performSelector:afterDelay:` | Yes | "Banned deferred dynamic dispatch" | Direct calls; static task DAG | `test_banned_perform_selector.m` ⬜ |
-| Lightweight generics (`NSArray<NSString *>`) | Yes | "Banned erased generic hints" | Real constrained `vgeneric` | `test_banned_nsarray_generics.m` ⬜ |
-| Runtime thread spawn (`NSThread`, `dispatch_async`, GCD) | Yes | "Banned runtime scheduling on constrained paths" | Static topology; `vasync` fixed DAGs (`@cold`-only escape) | `test_banned_runtime_spawn.m` ⬜ |
-| `@try` / `@catch` / `@finally` (unwinding) | Yes | "Banned exception unwinding" | `return err from f` (hidden flag, no unwinder) | `test_banned_try_catch.m` ⬜ |
+| `id` in any declaration | Yes | "Banned use of generic 'id' type" | Sealed protocols, concrete nominal types | `test_banned_id.m` (+ field/param), `valid_objc_id_usage.m` ✓ |
+| `NSObject` inheritance | Yes | "Banned inheritance from 'NSObject'" | `@owned` freestanding classes | `test_banned_nsobject.m`, `valid_objc_nsobject_inheritance.m` ✓ |
+| Untyped / dynamic receiver messaging | Yes | "Dynamic message dispatch requires an explicitly typed receiver" | Nominal devirtualization | `test_banned_untyped_msg.m`, `valid_objc_untyped_messaging.m` ✓ |
+| Messaging nil on unproven pointers | Yes (returns nil) | "Banned nil messaging on unproven pointer" | `vvariant` for absence; proven-null via contracts | `test_banned_nil_msg.m`, `valid_objc_nil_messaging.m` ✓ |
+| Runtime reflection (`NSClassFromString`, `objc_getClass`, `class_copyMethodList`) | Yes | "Banned Apple runtime reflection" | `@reflect()` at compile time | `test_banned_reflection.m`, `valid_objc_runtime_reflection.m` ✓ |
+| Method swizzling (`method_exchangeImplementations`) | Yes | "Banned runtime method surgery" | None — method tables are immutable and link-time hashed | `test_banned_swizzling.m`, `valid_objc_category_swizzle.m` ✓ |
+| Categories | Yes | "Banned categories" | Method overloads + sealed protocols | `test_banned_category.m`, `valid_objc_category.m` ✓ |
+| KVC / KVO (`setValue:forKey:`, `addObserver:`) | Yes | "Banned key-value coding/observation" | `@reflect` offsets; `vweak` observation | `test_banned_kvc.m`, `valid_objc_kvc_roundtrip.m` ✓ |
+| `@dynamic` properties / dynamic method resolution | Yes | "Banned dynamic property synthesis" | Checked, packed `@owned` ivars | `test_banned_dynamic_prop.m`, `valid_objc_dynamic_property.m` ✓ |
+| `performSelector:` / `performSelector:afterDelay:` | Yes | "Banned deferred dynamic dispatch" | Direct calls; static task DAG | `test_banned_perform_selector.m`, `valid_objc_perform_selector.m` ✓ |
+| Lightweight generics (`NSArray<NSString *>`) | Yes | "Banned erased generic hints" | Real constrained `vgeneric` | `test_banned_nsarray_generics.m`, `valid_objc_lightweight_generics.m` ✓ |
+| Runtime thread spawn (`NSThread`, `dispatch_async`, GCD) | Yes | "Banned runtime scheduling on constrained paths" | Static topology; `vasync` fixed DAGs (`@cold`-only escape) | `test_banned_runtime_spawn.m`, `valid_objc_gcd_pipeline.m` ✓ |
+| `@try` / `@catch` / `@finally` (unwinding) | Yes | "Banned exception unwinding" | `return err from f` (hidden flag, no unwinder) | `test_banned_try_catch.m`, `valid_objc_try_catch.m` ✓ |
 
 ### B. Memory & Ownership
 
 | Banned construct | Valid ObjC/C? | Diagnostic (key phrase) | VeriObjC replacement | Test |
 | :--- | :--- | :--- | :--- | :--- |
 | Escaping data-stack reference | Yes (raw pointers) | "reference rooted at ... does not outlive the destination" | Pool handles; `vweak` | `test_banned_escaping_stack_ref.m` ✓ |
-| Escaping function block | Yes | "Banned escaping function block" | Non-escaping blocks only | `test_banned_escaping_block.m` ✓ |
+| Escaping function block | Yes | "Banned escaping function block" | Non-escaping blocks only | `test_banned_escaping_block.m`, `valid_objc_escaping_block.m` ✓ |
 | Non-flat channel payload | Yes | "Banned non-flat channel payload" | Flat values; crossing = `memcpy` | `test_banned_nonflat_channel.m` ✓ |
-| General heap on constrained paths | Yes (`malloc`) | "`@alloc` not permitted in `@nolatency` context" | Data stacks / `vpool` | `test_banned_heap_nolatency.m` ⬜ |
+| General heap on constrained paths | Yes (`malloc`) | "`@alloc` not permitted in `@nolatency` context" | Data stacks / `vpool` | `test_banned_heap_nolatency.m` ✓ |
 | Double free / use-after-move | — | Linear ownership violation | `move`/`consumed` tracking | `test_banned_double_free.m` ✓ |
 | Unannotated `extern fn` called from `@nolatency` | Yes | "defaults to `@cold`" | Declared effects on `extern fn` | `test_cold_ffi_call.m` ✓ |
 | Data-stack reference / pool slot across FFI | Yes | "Banned cross-boundary ownership" | Opaque `vpool` handles | `test_ffi_stack_ref_export.m` ✓ |
-| Allocator mixing (foreign `free`, VeriObjC recycling of foreign memory) | Yes | "Banned allocator mixing" | Each allocator's products stay on its side | `test_banned_alloc_mixing.m` ⬜ |
+| Allocator mixing (foreign `free`, VeriObjC recycling of foreign memory) | Yes | "Banned allocator mixing" | Each allocator's products stay on its side | `test_banned_alloc_mixing.m`, `valid_objc_alloc_mixing.m` ✓ |
 
 ### C. Metaprogramming (vmeta)
 
 | Banned construct | Diagnostic (key phrase) | VeriObjC replacement | Test |
 | :--- | :--- | :--- | :--- |
-| Unconstrained type parameters | "Unconstrained type parameter" | `vgeneric` with declared constraints | `test_banned_unconstrained_generic.m` ⬜ |
-| Specialization / SFINAE-style probing | "Banned specialization/probing" | Plain overloads; explicit `where` | `test_banned_specialization.m` ⬜ |
-| Computation macros (preprocessor codegen) | "Banned computation macro" | `vconstexpr`; `@reflect`/`@objc_soa` codegen | `test_banned_computation_macro.m` ⬜ |
-| Unbounded compile-time recursion | "Fuel exhausted (function, line, steps)" | Fueled interpreter — clean error, never a hang | `test_banned_fuel_exhaustion.m` ⬜ |
-| `auto` in parameters / public signatures | "Banned inference in signature position" | Concrete types or constrained `vgeneric` | `test_banned_auto_param.m` / `test_banned_auto_export.m` ⬜ |
-| `vregex` backreferences / lookaround | "No DFA can exist for this pattern" (with rewrite suggestion) | Regular-language dialect | `test_backref_regex.m` ✓ |
+| Unconstrained type parameters | "Unconstrained type parameter" | `vgeneric` with declared constraints | `test_banned_unconstrained_generic.m` ✓ |
+| Specialization / SFINAE-style probing | "Banned specialization/probing" | Plain overloads; explicit `where` | `test_banned_specialization.m` ✓ |
+| Computation macros (preprocessor codegen) | "Banned computation macro" | `vconstexpr`; `@reflect`/`@objc_soa` codegen | `test_banned_computation_macro.m` ✓ |
+| Unbounded compile-time recursion | "Fuel exhausted (function, line, steps)" | Fueled interpreter — clean error, never a hang | `test_banned_vconstexpr_fuel.m` ✓ |
+| `auto` in parameters / public signatures | "Banned inference in signature position" | Concrete types or constrained `vgeneric` | `test_banned_auto_param.m` / `test_banned_auto_export.m` ✓ |
+| `vregex` backreferences / lookaround | "No DFA can exist for this pattern" (with rewrite suggestion) | Regular-language dialect | `test_banned_backref_regex.m` ✓ |
 | Regex state explosion | "Byte budget exceeded (pattern named)" | Manifest table budget | `test_regex_state_explosion.m` ✓ |
 
 ### D. veriStream
 
 | Banned construct | Diagnostic | Replacement | Test |
 | :--- | :--- | :--- | :--- |
-| Width-mismatched `zip` | "Stream width mismatch" | Compile-time equal-N check | `test_banned_stream_width_mismatch.m` ⬜ |
-| Context exceeding `ContextCap` | "Context cap exceeded — compile error" | Pre-banked BRAM arenas | `test_banned_context_overflow.m` ⬜ |
+| Width-mismatched `zip` | "Stream width mismatch" | Compile-time equal-N check | `test_banned_stream_width_mismatch.m` ✓ |
+| Context exceeding `ContextCap` | "Context cap exceeded — compile error" | Pre-banked BRAM arenas | `test_banned_context_overflow.m` ✓ |
 
 ---
 
