@@ -63,6 +63,12 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Cannot inherit from final class"
     elif [[ "$base_name" == test_banned_unsealed_protocol* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Protocol"
+    elif [[ "$base_name" == test_banned_use_after_move* ]] || [[ "$base_name" == test_banned_double_free* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Use of consumed linear variable"
+    elif [[ "$base_name" == test_banned_escaping_stack_ref* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Escaping data-stack reference"
+    elif [[ "$base_name" == test_banned_nonflat_channel* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Non-flat channel payload type"
     fi
 
     OUTPUT=$(clang-23 -Xclang -load -Xclang "$PLUGIN_PATH" \

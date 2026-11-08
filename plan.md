@@ -130,14 +130,14 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Enforces sealed class inheritance (`test_banned_unsealed_inheritance.m`), final class non-subclassability (`test_banned_final_inheritance.m`), and sealed protocol conformance (`test_banned_unsealed_protocol.m`).
 
 ### 2.4 Linear Ownership & Data-Stack State Tracker
-- [ ] **Task 2.4.1: Move Semantics & Consumed State Tracker**
-  - Linear ownership graph: `Unallocated -> Active -> Consumed/Dead`.
-  - Double-free and use-after-move compile rejection.
-- [ ] **Task 2.4.2: Reference Root Safety**
-  - Statically prove every data-stack reference is bounded by its declaring scope mark.
-  - Rejection of escaping data-stack references.
-- [ ] **Task 2.4.3: Flat-Value Channel Enforcement**
-  - Statically verify payload types of `vatomic_channel` contain no pointer references.
+- [x] **Task 2.4.1: Move Semantics & Consumed State Tracker [TDD Cycle 12]**
+  - Linear ownership graph (`Unallocated -> Active -> Consumed/Dead`) via `veriobjc_move()` / `__veriobjc_mark_moved` and `__attribute__((objc_consumed))` parameter tracking.
+  - Double-free (`veriobjc_pool_free` / `veriobjc_gen_pool_free`) and use-after-move compile rejection (`test_banned_double_free.m`, `test_banned_use_after_move.m`).
+- [x] **Task 2.4.2: Reference Root Safety [TDD Cycle 12]**
+  - Statically proves every data-stack reference (`veriobjc_stack_alloc` / `veriobjc_alloc_init`) is bounded by its declaring lexical scope depth (`analyzeScopeRootSafety`).
+  - Rejects escaping data-stack references assigned to outer-scope destinations (`test_banned_escaping_stack_ref.m`).
+- [x] **Task 2.4.3: Flat-Value Channel Enforcement [TDD Cycle 12]**
+  - Registered `__attribute__((objc_flat))` Sema attribute and statically verifies payload types of `veriobjc_channel_send` and `objc_flat` structs/typedefs contain zero pointer/reference fields at any nesting depth (`test_banned_nonflat_channel.m`, `test_valid_linear_and_channel.m`, `examples/linear_channel_router.m`).
 
 ### 2.5 Syntactic Lowering Passes
 - [ ] **Task 2.5.1: Range-Based For Loop Lowering**

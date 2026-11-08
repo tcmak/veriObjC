@@ -333,6 +333,60 @@ static inline veriobjc_imp_t veriobjc_object_dispatch(const struct veriobjc_obje
 }
 
 // ---------------------------------------------------------------------------
+// Linear Ownership & Move Semantics Intrinsic
+// ---------------------------------------------------------------------------
+
+static inline void __veriobjc_mark_moved(const void *ptr) {
+    (void)ptr;
+}
+
+#define veriobjc_move(x) (__veriobjc_mark_moved(&(x)), (x))
+
+// ---------------------------------------------------------------------------
+// Lock-Free Single-Producer Single-Consumer Flat-Value Channel Stub
+// ---------------------------------------------------------------------------
+
+struct veriobjc_channel {
+    uint8_t *ring_base;
+    size_t   slot_size;
+    uint32_t capacity;
+    uint32_t head;
+    uint32_t tail;
+};
+
+static inline void veriobjc_channel_init(struct veriobjc_channel *ch, void *ring_buf, size_t slot_size, uint32_t capacity) {
+    if (!ch) { return; }
+    ch->ring_base = (uint8_t *)ring_buf;
+    ch->slot_size = slot_size;
+    ch->capacity  = capacity;
+    ch->head      = 0u;
+    ch->tail      = 0u;
+}
+
+static inline bool veriobjc_channel_send(struct veriobjc_channel *ch, const void *flat_payload, size_t payload_size) {
+    if (!ch || !ch->ring_base || !flat_payload || payload_size != ch->slot_size || ch->capacity == 0u) {
+        return false;
+    }
+    if (ch->head - ch->tail >= ch->capacity) {
+        return false;
+    }
+    uint32_t slot = ch->head % ch->capacity;
+    __builtin_memcpy(ch->ring_base + (size_t)slot * ch->slot_size, flat_payload, payload_size);
+    ch->head++;
+    return true;
+}
+
+static inline bool veriobjc_channel_recv(struct veriobjc_channel *ch, void *out_flat_payload, size_t payload_size) {
+    if (!ch || !ch->ring_base || !out_flat_payload || payload_size != ch->slot_size || ch->head == ch->tail) {
+        return false;
+    }
+    uint32_t slot = ch->tail % ch->capacity;
+    __builtin_memcpy(out_flat_payload, ch->ring_base + (size_t)slot * ch->slot_size, payload_size);
+    ch->tail++;
+    return true;
+}
+
+// ---------------------------------------------------------------------------
 // Closed-World Object Construction Hook
 // ---------------------------------------------------------------------------
 

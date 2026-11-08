@@ -113,3 +113,53 @@ TEST(VeriObjC_ScopeAndLayout, ScopeCleanupNullGuards) {
     veriobjc_scope_cleanup(&empty_guard);
     VeriObjC_ScopeRelease(&empty_guard);
 }
+
+// Contract 6: Move semantics intrinsic and flat-value SPSC channel operations & edge cases
+TEST(VeriObjC_ScopeAndLayout, MoveIntrinsicAndFlatChannelOperations) {
+    HeaderlessParticle p1 = { 1.0f, 2.0f, 42u };
+    HeaderlessParticle p2 = veriobjc_move(p1);
+    LONGS_EQUAL(42u, p2.id);
+
+    // Null guard on channel init
+    veriobjc_channel_init(nullptr, nullptr, sizeof(HeaderlessParticle), 2);
+
+    HeaderlessParticle ring[2];
+    struct veriobjc_channel ch;
+    veriobjc_channel_init(&ch, ring, sizeof(HeaderlessParticle), 2);
+
+    // Defensive null / invalid size / empty capacity guards on send & recv
+    CHECK_FALSE(veriobjc_channel_send(nullptr, &p2, sizeof(HeaderlessParticle)));
+    CHECK_FALSE(veriobjc_channel_send(&ch, nullptr, sizeof(HeaderlessParticle)));
+    CHECK_FALSE(veriobjc_channel_send(&ch, &p2, sizeof(HeaderlessParticle) - 1));
+
+    struct veriobjc_channel no_ring_ch;
+    veriobjc_channel_init(&no_ring_ch, nullptr, sizeof(HeaderlessParticle), 2);
+    CHECK_FALSE(veriobjc_channel_send(&no_ring_ch, &p2, sizeof(HeaderlessParticle)));
+    CHECK_FALSE(veriobjc_channel_recv(&no_ring_ch, &p1, sizeof(HeaderlessParticle)));
+
+    struct veriobjc_channel zero_cap_ch;
+    veriobjc_channel_init(&zero_cap_ch, ring, sizeof(HeaderlessParticle), 0);
+    CHECK_FALSE(veriobjc_channel_send(&zero_cap_ch, &p2, sizeof(HeaderlessParticle)));
+
+    HeaderlessParticle out = { 0.0f, 0.0f, 0u };
+    CHECK_FALSE(veriobjc_channel_recv(nullptr, &out, sizeof(HeaderlessParticle)));
+    CHECK_FALSE(veriobjc_channel_recv(&ch, nullptr, sizeof(HeaderlessParticle)));
+    CHECK_FALSE(veriobjc_channel_recv(&ch, &out, sizeof(HeaderlessParticle) - 1));
+    // Empty channel recv fails
+    CHECK_FALSE(veriobjc_channel_recv(&ch, &out, sizeof(HeaderlessParticle)));
+
+    // Send 2 items (fills capacity 2)
+    HeaderlessParticle m1 = { 3.0f, 4.0f, 100u };
+    HeaderlessParticle m2 = { 5.0f, 6.0f, 200u };
+    CHECK_TRUE(veriobjc_channel_send(&ch, &m1, sizeof(HeaderlessParticle)));
+    CHECK_TRUE(veriobjc_channel_send(&ch, &m2, sizeof(HeaderlessParticle)));
+    // 3rd send fails when full
+    CHECK_FALSE(veriobjc_channel_send(&ch, &m1, sizeof(HeaderlessParticle)));
+
+    // Recv 2 items in FIFO order
+    CHECK_TRUE(veriobjc_channel_recv(&ch, &out, sizeof(HeaderlessParticle)));
+    LONGS_EQUAL(100u, out.id);
+    CHECK_TRUE(veriobjc_channel_recv(&ch, &out, sizeof(HeaderlessParticle)));
+    LONGS_EQUAL(200u, out.id);
+    CHECK_FALSE(veriobjc_channel_recv(&ch, &out, sizeof(HeaderlessParticle)));
+}
