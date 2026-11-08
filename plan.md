@@ -158,6 +158,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.6: Compile-Time Regex (`vregex`) to DFA in `.rodata` [TDD Cycle 18]**
   - Implemented Thompson NFA construction, Powerset Subset Construction, and Hopcroft Equivalence-Class Minimization inside `VeriObjCPlugin.cpp` (`compileRegexToMinimizedDFA`), lowering `vregex_match(pattern, input, len)` into `.rodata` transition tables (`__veriobjc_dfa_trans_*`) and branchless O(1)-per-byte `veriobjc_dfa_match` calls (`test_valid_vregex.m`, `examples/fix_protocol_dfa_router.m`).
   - Statically rejects backreferences (`\1`..`\9`), lookaround assertions (`(?=`, `(?!`), and excessive group nesting (`test_banned_backref_regex.m`).
+- [ ] **Task 2.5.7: Nominal Local Type Inference (`auto`)**
+  - Single-pass exact nominal deduction for local `VarDecl`s: no implicit conversions, no array decay, no proxy capture; `auto &` yields a root-checked borrow (same analyzer as Task 2.4.2); `vstrong` types never unwrap under inference.
+  - Reject `auto` in function parameters (`test_banned_auto_param.m`) and in protocol/`@export` method return types (`test_banned_auto_export.m`); private/helper returns permitted.
 
 ### 2.6 Hardware Stream Elaboration (`veriStream`)
 *(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — Neural Inference Substrate)*
@@ -173,6 +176,19 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [ ] **Task 2.6.3: Elaboration Budgets & `--hw-report`**
   - Elaborate `map` as N parallel hardware copies counted against a manifest-declared LUT budget (same budget machinery as `--mono-report`).
   - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel; **fail the build if the post-synthesis vendor report shows any DSP block instantiated**.
+
+### 2.7 Ban List Compliance Suite
+*(Mapped to: `docs/veriobjc-ban-list.md` — Ban Registry & Rejection Corpus)*
+
+- [ ] **Task 2.7.1: Centralized Ban Registry & Diagnostic Compliance Tests**
+  - Single-source ban registry (`docs/veriobjc-ban-list.md`): every banned construct mapped to its exact diagnostic string and test file (existing ✓ tests from Tasks 2.2/2.4/2.5 imported as rows; ⬜ rows added as their features land).
+  - Unit tests assert the **named diagnostic fires**, not merely compilation failure — diagnostic text matched per file.
+  - CI gate: 100% of the registry's corpus fails under the plugin (`ban_corpus_tests`).
+- [ ] **Task 2.7.2: Valid-ObjC Rejection Corpus (`examples/banned/`)**
+  - Files of **perfectly valid stock Objective-C** that VeriObjC rejects: `id` usage, categories, swizzling, KVC/KVO, nil messaging, `@try`/`@catch`, GCD spawns, lightweight generics, escaping blocks, runtime class lookup, `performSelector:`, `@dynamic` properties.
+  - Dual-direction gate per file (`tests/integration/run_ban_corpus_test.sh`): compiles `-Werror` clean under **stock Clang 23** *and* fails under the plugin with the exact named diagnostic. A file that doesn't compile as plain ObjC is rejected from the corpus — it proves nothing.
+  - Every corpus file pairs with its registry row and the ban's replacement (id → sealed protocols; categories → overloads; KVC → `@reflect`; nil messaging → `vvariant`; `@try` → `return err from`; GCD → static topology).
+
 
 ---
 

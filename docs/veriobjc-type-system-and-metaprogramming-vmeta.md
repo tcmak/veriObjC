@@ -63,11 +63,29 @@ vgeneric <K : FlatValue & Hashable>
 
 The compiler proposes a strategy per generic in the `--mono-report`; the choice is recorded and reviewed like any effect decision.
 
+### 1.1 Local Type Inference (`auto`): Inference Is Not Genericity
+
+```objc
+auto first = tokens.push('A');        // exact element type, resolved once at the definition
+for (auto &ch : wire) { ... }         // ch is a borrow, root-checked
+consteval auto W = 512;              // compile-time binding
+```
+
+- `auto` = the **exact nominal type of the initializer**, resolved once at the definition. No implicit conversions, no array-to-pointer decay, no `initializer_list` to capture, and no proxy types — flat value semantics means no proxies exist to silently bind. The AST dump carries the concrete type; `auto` is simply gone.
+- `auto &` yields a **borrow rooted at the source scope** — the same root-safety machinery that rejects escaping data-stack references applies. The dangling-reference-from-a-temporary class of C++ bugs is a compile error, not a code-review finding.
+- **Inference never weakens checking:** `@pre`/`@post`, effects, and flatness all resolve against the concrete deduced type. Deduction is unambiguous in the closed world, and definition-site rules apply regardless of whether the type was written or deduced.
+- **Banned:**
+  - `auto` **parameters** — that is duck typing, the unconstrained genericity §1 exists to replace. Parameters take concrete types or constrained `vgeneric`.
+  - `auto&&` **forwarding references** — do not exist; borrowing is the parameter discipline, not a value-category trick.
+  - `auto` **return types on protocol and `@export` methods** — public signatures carry explicit types, because the generated C header and the review surface are the contract. Private/helper functions may use it.
+  - `vstrong` **never unwraps** under inference: `auto p = Price(1234)` is a `Price`.
+- **The principle:** inference for locals, explicitness for contracts. Every signature a reviewer, the solver, or the FFI header must read states its type; `auto` only saves restating a type the compiler can already see exactly once.
+
 ---
 
 ## 2. Compile-Time Computation: `vconstexpr` — an Interpreter, Not a Type System
 
-Compile-time work is **ordinary code executed by a bounded interpreter**, not template recursion. This is the direct answer to the trader-who-OOM'd-the-compiler story: there is no instantiation-driven recursion to explode; there is a step counter that stops with a clean error.
+Compile-time work is **ordinary code executed by a bounded interpreter**, not template recursion. This is the direct answer to template-explosion compiler crashes: there is no instantiation-driven recursion to explode; there is a step counter that stops with a clean error.
 
 ```objc
 // Ordinary code, evaluated at compile time. Deterministic, memoized.
@@ -92,7 +110,7 @@ vconstexpr uint32_t PriceToTickTable[65536] = buildTickTable();
 
 ### Traits: enumerating instead of branching
 
-The Day-10 pattern — "raise a runtime branch into a compile-time trait" — is served by `vtrait`, a closed trait table evaluated by the interpreter:
+A pattern common among HFT C++ desks — "raise a runtime branch into a compile-time trait" — is served by `vtrait`, a closed trait table evaluated by the interpreter:
 
 ```objc
 vtrait HashStrategy<T> { ... }        // defined per sealed type list
@@ -169,7 +187,7 @@ Strong types interoperate with `vvariant` tags, channel payloads (still flat), a
 
 ## 6. Borrow, Sink, and Weak — the Ownership Taxonomy
 
-Named, checked forms of sink/borrow/share lesson — `@shared` refcounting is quarantined to `@cold`, so "share" becomes **weak observation** instead:
+Named, checked forms of the sink/borrow/share discipline common among HFT C++ desks — `@shared` refcounting is quarantined to `@cold`, so "share" becomes **weak observation** instead:
 
 ```objc
 - (void)consume:(move Order)order;        // SINK: caller provably loses ownership (linear tracking)
@@ -186,7 +204,7 @@ Named, checked forms of sink/borrow/share lesson — `@shared` refcounting is qu
 
 ## 7. Layout Control Attributes
 
-Padding/alignment lesson as dialect syntax, because wire codecs require exact layouts:
+Padding/alignment control as dialect syntax, because wire codecs require exact layouts:
 
 ```objc
 typedef struct __packed  { uint16_t len; uint8_t payload[64]; } WireHeader;  // no padding
@@ -206,7 +224,7 @@ typedef struct { __empty_member LogTag tag; uint32_t x; } Node;              // 
 | Unconstrained `typename T`                    | Errors at instantiation; no contract                | Constrained `vgeneric` (§1)                                              |
 | SFINAE / substitution probing                 | Overload resolution *is* unbounded type computation | Named constraints, plain overloads, `vconditional` tables                |
 | Template specialization as a programming tool | Hidden per-type behavior; the explosion vector      | Method overloads / explicit `where` at definition                        |
-| Recursive template metaprogramming            | No cost model; the OOM story                        | `vconstexpr` interpreter with fuel (§2)                                  |
+| Recursive template metaprogramming            | No cost model; hangs and OOMs the compiler          | `vconstexpr` interpreter with fuel (§2)                                  |
 | CRTP                                          | Compile-time polymorphism via duplication           | Sealed protocols, statically dispatched; `@erased` generics (§1)         |
 | Unbounded variadic packs                      | Fold/combining explosions                           | `vpack` depth 8; `vconstexpr` loops over `vtuple` (§3)                   |
 | Macros generating code                        | Invisible, unhygienic                               | `@reflect` / `objc_soa` codegen, visible in the AST dump                 |
@@ -215,10 +233,10 @@ typedef struct { __empty_member LogTag tag; uint32_t x; } Node;              // 
 
 ---
 
-## 9. Mapping to the HFT C++ Curriculum
+## 9. Mapping to Common HFT C++ Practices
 
 
-| Training topic (Day)      | C++ mechanism                               | VeriObjC mechanism                                              |
+| C++ practice              | C++ mechanism                               | VeriObjC mechanism                                              |
 | :------------------------- | :------------------------------------------- | :--------------------------------------------------------------- |
 | Templates &amp; concepts  | Templates, specialization, two-phase        | `vgeneric`, definition-site checking, no specialization-as-TMA  |
 | Compile-time work         | Template metaprogramming, `constexpr`       | `vconstexpr` with fuel; `vtrait` tables; `consteval`            |
@@ -228,4 +246,4 @@ typedef struct { __empty_member LogTag tag; uint32_t x; } Node;              // 
 | Strong types (`mpl::Tag`) | Hand-rolled tag wrappers                    | `vstrong` newtypes                                              |
 | Borrow/sink/share         | Smart pointer conventions                   | `move` / `borrow` / `vweak` with root &amp; generation checks   |
 | Padding &amp; alignment   | `alignas`, `#pragma pack`                   | `__packed`, `__align`, `__empty_member` + layout asserts        |
-| Template cost warnings    | "Every template parameter gets constrained" | Constraints mandatory + `--mono-report` + instantiation budgets |
+| Constraint discipline     | Every template parameter gets constrained   | Constraints mandatory + `--mono-report` + instantiation budgets |
