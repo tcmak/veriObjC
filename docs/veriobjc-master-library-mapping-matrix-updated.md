@@ -100,4 +100,5 @@ This forms your **VeriObjC Standard Library (`vstd`)**. You will develop these m
 | **Strong Typing** | Hand-rolled tag wrappers (`mpl::Tag`) | 🛠️ **We Must Create** | Implemented as `vstrong` newtypes with no implicit conversions |
 | **Borrow / Ownership Taxonomy** | Smart-pointer conventions (sink/borrow/share) | 🛠️ **We Must Create** | Implemented as `move` / `borrow` / `vweak` generation-checked handles |
 | **Instantiation Cost Control** | *(no C++ equivalent — the gap)* | 🛠️ **We Must Create** | Manifest-declared monomorphization budgets + `--mono-report`; compiler cannot OOM |
-| **Microbenchmark Culture** | "No number, no claim" (Day 8) | 🛠️ **We Must Create** | Implemented as the Measurement & Latency CI module (budget gates, report diffs) |
+| **Microbenchmark Culture** | "No number, no claim" (a common HFT practice) | 🛠️ **We Must Create** | Implemented as the Measurement & Latency CI module (budget gates, report diffs) |
+| **Ternary LLM Inference (FPGA)** | BitNet b1.58 / MatMul-free LM | 🛠️ **We Must Create** | Implemented as `veriStream` (`ll.ml/`): `Bits<W>` wires, `Stream<T,N>` per-clock flows, `ternary_select` lowered to MUX + adder trees + popcount; pure-LUT 1.58-bit inference, `--hw-report` budgets |

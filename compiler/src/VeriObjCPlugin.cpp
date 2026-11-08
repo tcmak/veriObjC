@@ -39,6 +39,18 @@ private:
     std::vector<FunctionDecl *> SynthesizedDefs;
     llvm::DenseMap<const FunctionDecl *, std::vector<ErrFromReq>> DirectRaisesFrom;
     llvm::DenseMap<const FunctionDecl *, llvm::SmallVector<std::pair<const FunctionDecl *, SourceLocation>, 4>> CallEdges;
+    llvm::DenseMap<const VarDecl *, FunctionDecl *> MonomorphizedBlocks;
+    llvm::DenseMap<const VarDecl *, llvm::SmallVector<VarDecl *, 4>> BlockCapturedVars;
+    unsigned MonoBlockCounter = 0;
+
+    void reportEscapingBlock(SourceLocation Loc) {
+        DiagnosticsEngine &Diag = Context->getDiagnostics();
+        unsigned DiagID = Diag.getCustomDiagID(
+            DiagnosticsEngine::Error,
+            "VeriObjC Violation: Escaping function block is banned. Function blocks must be non-escaping and monomorphized at compile time."
+        );
+        Diag.Report(Loc, DiagID);
+    }
 
     static const VarDecl *extractVarDecl(const Expr *E) {
         if (!E) return nullptr;
@@ -329,13 +341,18 @@ private:
 
     void remapMethodVarRefs(Stmt *S, const llvm::DenseMap<const ValueDecl *, ValueDecl *> &DeclMap) {
         if (!S) return;
-        for (Stmt *Child : S->children()) {
+        for (Stmt *&Child : S->children()) {
+            if (!Child) continue;
             remapMethodVarRefs(Child, DeclMap);
-        }
-        if (auto *DRE = dyn_cast<DeclRefExpr>(S)) {
-            auto It = DeclMap.find(DRE->getDecl());
-            if (It != DeclMap.end()) {
-                DRE->setDecl(It->second);
+            if (auto *DRE = dyn_cast<DeclRefExpr>(Child)) {
+                auto It = DeclMap.find(DRE->getDecl());
+                if (It != DeclMap.end()) {
+                    Child = DeclRefExpr::Create(
+                        *Context, NestedNameSpecifierLoc(), SourceLocation(),
+                        It->second, /*RefersToEnclosingVariableOrCapture=*/false,
+                        DRE->getLocation(), It->second->getType(), VK_LValue
+                    );
+                }
             }
         }
     }
@@ -553,10 +570,124 @@ private:
         }
     }
 
+    FunctionDecl *synthesizeMonomorphizedBlock(BlockExpr *BE, llvm::SmallVectorImpl<VarDecl *> &OutCaptures) {
+        if (!BE) return nullptr;
+        BlockDecl *BD = BE->getBlockDecl();
+        const FunctionProtoType *FPT = BE->getFunctionType();
+        if (!BD || !FPT) return nullptr;
+
+        QualType RetTy = FPT->getReturnType();
+        llvm::SmallVector<QualType, 8> ParamTypes;
+        for (const ParmVarDecl *PVD : BD->parameters()) {
+            ParamTypes.push_back(PVD->getType());
+        }
+        for (const BlockDecl::Capture &Cap : BD->captures()) {
+            if (VarDecl *CapVD = Cap.getVariable()) {
+                ParamTypes.push_back(CapVD->getType());
+                OutCaptures.push_back(CapVD);
+            }
+        }
+
+        FunctionProtoType::ExtProtoInfo EPI;
+        QualType FnTy = Context->getFunctionType(RetTy, ParamTypes, EPI);
+        std::string Name = "__veriobjc_mono_block_" + std::to_string(MonoBlockCounter++);
+        IdentifierInfo &II = Context->Idents.get(Name);
+        DeclContext *TU = Context->getTranslationUnitDecl();
+
+        FunctionDecl *BlockFD = FunctionDecl::Create(
+            *Context, TU, BD->getLocation(), BD->getLocation(),
+            &II, FnTy, nullptr, SC_Static
+        );
+
+        llvm::SmallVector<ParmVarDecl *, 8> Params;
+        llvm::DenseMap<const ValueDecl *, ValueDecl *> DeclMap;
+
+        for (ParmVarDecl *OrigPVD : BD->parameters()) {
+            ParmVarDecl *ClonedPVD = ParmVarDecl::Create(
+                *Context, BlockFD, OrigPVD->getBeginLoc(), OrigPVD->getLocation(),
+                OrigPVD->getIdentifier(), OrigPVD->getType(),
+                OrigPVD->getTypeSourceInfo(), SC_None, nullptr
+            );
+            Params.push_back(ClonedPVD);
+            DeclMap[OrigPVD] = ClonedPVD;
+        }
+        for (VarDecl *CapVD : OutCaptures) {
+            ParmVarDecl *CapPVD = ParmVarDecl::Create(
+                *Context, BlockFD, CapVD->getBeginLoc(), CapVD->getLocation(),
+                CapVD->getIdentifier(), CapVD->getType(),
+                nullptr, SC_None, nullptr
+            );
+            Params.push_back(CapPVD);
+            DeclMap[CapVD] = CapPVD;
+        }
+
+        BlockFD->setParams(Params);
+        TU->addDecl(BlockFD);
+
+        Stmt *Body = BD->getBody();
+        if (Body) {
+            rewriteStmtTree(Body, BlockFD);
+            remapMethodVarRefs(Body, DeclMap);
+            BlockFD->setBody(Body);
+            SynthesizedDefs.push_back(BlockFD);
+        }
+        return BlockFD;
+    }
+
+    Expr *buildMonomorphizedBlockCall(CallExpr *CE, FunctionDecl *BlockFD, llvm::ArrayRef<VarDecl *> Captures) {
+        if (!CE || !BlockFD) return nullptr;
+        DeclRefExpr *CalleeRef = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            BlockFD, false, CE->getExprLoc(), BlockFD->getType(), VK_LValue
+        );
+        ImplicitCastExpr *CalleeCast = ImplicitCastExpr::Create(
+            *Context, Context->getPointerType(BlockFD->getType()),
+            CK_FunctionToPointerDecay, CalleeRef, nullptr, VK_PRValue, FPOptionsOverride()
+        );
+
+        llvm::SmallVector<Expr *, 8> CallArgs;
+        for (unsigned i = 0; i < CE->getNumArgs(); ++i) {
+            CallArgs.push_back(CE->getArg(i));
+        }
+        for (VarDecl *CapVD : Captures) {
+            DeclRefExpr *CapRef = DeclRefExpr::Create(
+                *Context, NestedNameSpecifierLoc(), SourceLocation(),
+                CapVD, false, CE->getExprLoc(), CapVD->getType(), VK_LValue
+            );
+            ImplicitCastExpr *CapRVal = ImplicitCastExpr::Create(
+                *Context, CapVD->getType(), CK_LValueToRValue,
+                CapRef, nullptr, VK_PRValue, FPOptionsOverride()
+            );
+            CallArgs.push_back(CapRVal);
+        }
+
+        return CallExpr::Create(
+            *Context, CalleeCast, CallArgs, BlockFD->getReturnType(),
+            VK_PRValue, CE->getRParenLoc(), FPOptionsOverride()
+        );
+    }
+
     void rewriteStmtTree(Stmt *S, DeclContext *DC) {
         if (!S) return;
         for (Stmt *&Child : S->children()) {
             if (!Child) continue;
+            if (auto *DS = dyn_cast<DeclStmt>(Child)) {
+                for (Decl *D : DS->decls()) {
+                    if (auto *VD = dyn_cast<VarDecl>(D)) {
+                        if (VD->getType()->isBlockPointerType() && !VD->hasGlobalStorage() && VD->getInit()) {
+                            if (auto *BE = dyn_cast<BlockExpr>(VD->getInit()->IgnoreParenImpCasts())) {
+                                llvm::SmallVector<VarDecl *, 4> Captures;
+                                if (FunctionDecl *BlockFD = synthesizeMonomorphizedBlock(BE, Captures)) {
+                                    MonomorphizedBlocks[VD] = BlockFD;
+                                    BlockCapturedVars[VD] = std::move(Captures);
+                                    VD->setInit(nullptr);
+                                    VD->setType(Context->IntTy);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (auto *OFS = dyn_cast<ObjCForCollectionStmt>(Child)) {
                 if (Stmt *LoweredFor = buildLoweredForCollection(OFS, DC)) {
                     Child = LoweredFor;
@@ -569,6 +700,27 @@ private:
                     if (CalleeFD->getName() == "__veriobjc_return_err_from" && CE->getNumArgs() >= 2) {
                         Child = CE->getArg(0);
                         continue;
+                    }
+                } else if (Expr *Callee = CE->getCallee()) {
+                    Callee = Callee->IgnoreParenImpCasts();
+                    if (auto *DRE = dyn_cast<DeclRefExpr>(Callee)) {
+                        if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+                            auto It = MonomorphizedBlocks.find(VD);
+                            if (It != MonomorphizedBlocks.end()) {
+                                if (Expr *DirectBlockCall = buildMonomorphizedBlockCall(CE, It->second, BlockCapturedVars[VD])) {
+                                    Child = DirectBlockCall;
+                                    continue;
+                                }
+                            }
+                        }
+                    } else if (auto *BE = dyn_cast<BlockExpr>(Callee)) {
+                        llvm::SmallVector<VarDecl *, 4> Captures;
+                        if (FunctionDecl *BlockFD = synthesizeMonomorphizedBlock(BE, Captures)) {
+                            if (Expr *DirectBlockCall = buildMonomorphizedBlockCall(CE, BlockFD, Captures)) {
+                                Child = DirectBlockCall;
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -591,6 +743,9 @@ public:
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
         }
+        if (T->isBlockPointerType() && D->hasGlobalStorage()) {
+            reportEscapingBlock(D->getLocation());
+        }
 
         if (hasVeriObjCAnnotation(D, "objc_flat")) {
             checkFlatPayloadType(T, D->getName(), D->getLocation());
@@ -610,6 +765,25 @@ public:
         QualType T = D->getType();
         if (T->isObjCIdType()) {
             reportBannedId(D->getLocation());
+        }
+        if (T->isBlockPointerType()) {
+            reportEscapingBlock(D->getLocation());
+        }
+        return true;
+    }
+
+    bool VisitReturnStmt(ReturnStmt *S) {
+        if (const Expr *Ret = S->getRetValue()) {
+            if (Ret->getType()->isBlockPointerType()) {
+                reportEscapingBlock(S->getReturnLoc());
+            }
+        }
+        return true;
+    }
+
+    bool VisitBinaryOperator(BinaryOperator *BO) {
+        if (BO->getOpcode() == BO_Assign && BO->getLHS()->getType()->isBlockPointerType()) {
+            reportEscapingBlock(BO->getOperatorLoc());
         }
         return true;
     }

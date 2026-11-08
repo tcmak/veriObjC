@@ -124,3 +124,60 @@ __attribute__((objc_sealed))
 | Built-in-place construction | `out->at(slot)` writes | The parsed record is written straight into its final slot. |
 | `return err from parse` | the `guard` | Statically checked multi-frame return; typed, no unwinder. |
 | Flat-value crossing | the handoff | No references at any depth; channel send is a memcpy, verified at compile time. |
+
+---
+
+## 🧠 Example 3: MatMul-Free Inference on FPGA — a Ternary Block in `veriStream`
+
+One MatMul-free transformer block fragment on the `ll.ml` substrate. Streams are wires, not arrays: `Stream<Bits(8), 512>` is 512 wires arriving every clock. Token shift is a register delay, the GLU gate is a mux ladder, and the linear layer is `ternary_dot` — 512 CMUX lanes feeding a 9-stage adder tree. **No multipliers, no DSPs, no memory** — and the block's cycle cost is a contract the scheduler reads at compile time, not a measurement it takes after.
+
+```objc
+#import <vstd/stream.h>   // Bits<W>, Stream<T,N>: hardware-native streams
+#import <vstd/ternary.h>  // packed ternary weights {-1,0,1}, 4 per byte, BRAM-pinned
+
+consteval auto WIDTH   = 512;
+consteval auto LATENCY = clog2(WIDTH);   // 9 reduce stages — computed, not guessed
+
+typedef Stream<Bits(8), WIDTH> Activation;   // 512 wires, every cycle
+typedef Stream<Bits(2), WIDTH> TernaryW;     // 2 bits per weight, 4 per byte
+
+__attribute__((objc_sealed))
+@interface TernaryGLU : VeriObject
+- (Activation)apply:(Activation)x
+             prev:(RegisterDelay<WIDTH>)prev     // token shift = register depth
+             gate:(vspan<const TernaryW>)W_gate   // BRAM-pinned, verified on load
+             up:(vspan<const TernaryW>)W_up;
+@end
+
+@implementation TernaryGLU
+- (Activation)apply:(Activation)x prev:(RegisterDelay<WIDTH>)prev
+             gate:(vspan<const TernaryW>)W_gate up:(vspan<const TernaryW>)W_up {
+    // Token shift: yesterday's stream, one register deep. No memory, no copy.
+    Activation shifted = mux(USE_PREV, prev, x);
+
+    // The "linear layers": ternary_select lowers to CMUX lanes; accumulation
+    // is a popcount reduction into a log2(512) = 9-stage registered adder tree.
+    Bits(16) g = ternary_dot<WIDTH>(shifted, W_gate) @latency(LATENCY);
+    Bits(16) u = ternary_dot<WIDTH>(x,          W_up)   @latency(LATENCY);
+
+    // GLU: gate ⊙ up where the "multiply" is a sign-mux ladder, not a DSP.
+    return glu_gate(g, u);       // one activation per clock, fully pipelined
+}
+@end
+
+// The closed world schedules the whole block from contracts:
+//   shift: 0 cycles (a wire)   2 × ternary_dot: 9 cycles   glu gate: 1 cycle
+//   => @latency(cycles = 10), @throughput(1 per clock), DSP count = 0
+//      (asserted against the vendor synthesis report in CI via --hw-report).
+```
+
+### What this example demonstrates
+
+| Feature | Where | Guarantee |
+| :--- | :--- | :--- |
+| Stream semantics | `Activation` | 512 wires per clock: no memory, no addresses, no bounds to check — flat by construction. |
+| `ternary_select` lowering | `ternary_dot` | CMUX lanes + popcount adder tree; the multiply never exists, so no DSP blocks are instantiated. |
+| Cycle contracts | `@latency(LATENCY)` | Pipeline depth computed by `vconstexpr`; the DAG scheduler plans the block from contracts, not measurements. |
+| Packed ternary weights | `vspan<const TernaryW>` | 2 bits per weight, 4 per byte, BRAM-pinned; the image is verified by `from_bytes` before it becomes hardware-visible. |
+| GLU without multipliers | `glu_gate` | The gate "multiply" is a sign-mux ladder; the entire block is pure LUT logic. |
+| Fixed context | `RegisterDelay<WIDTH>` | Token shift is register depth, not heap history; exceeding the declared `ContextCap` is a compile error, not a runtime failure. |

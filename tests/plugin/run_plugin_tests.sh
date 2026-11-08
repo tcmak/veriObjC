@@ -28,13 +28,14 @@ trap 'rm -f "$TMP_OBJ"' EXIT
 
 for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
     echo "[RUN] Positive Test: $(basename "$pos_file")"
-    clang-23 -Xclang -load -Xclang "$PLUGIN_PATH" \
+    clang-23 -fblocks \
+             -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
              -c "$pos_file" \
              -o "$TMP_OBJ"
-    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation"; then
-        echo "[FAIL] Positive Test $(basename "$pos_file") emitted forbidden dynamic dispatch symbol (objc_msgSend / objc_msg_lookup / objc_enumerationMutation)!"
+    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
+        echo "[FAIL] Positive Test $(basename "$pos_file") emitted forbidden dynamic dispatch or block runtime symbol!"
         nm "$TMP_OBJ"
         exit 1
     fi
@@ -84,9 +85,12 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Range-based for loop requires a container with a statically bounded array field"
     elif [[ "$base_name" == test_banned_uncaught_err_from* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Uncaught multi-frame error return"
+    elif [[ "$base_name" == test_banned_escaping_block* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Escaping function block is banned"
     fi
 
-    OUTPUT=$(clang-23 -Xclang -load -Xclang "$PLUGIN_PATH" \
+    OUTPUT=$(clang-23 -fblocks \
+                      -Xclang -load -Xclang "$PLUGIN_PATH" \
                       -Xclang -add-plugin -Xclang veriobjc-check \
                       -I"$REPO_ROOT/rt/include" \
                       -c "$test_file" \

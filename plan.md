@@ -146,8 +146,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.2: Multi-Frame Error Return Lowering (`return err from f`) [TDD Cycle 14]**
   - Static call-graph active-frame verifier (`collectErrorReturnGraph` & `verifyMultiFrameErrorReturns`) ensuring every `veriobjc_return_err_from(err, target_frame)` call site provably terminates inside an active `target_frame` without an exception unwinder (`test_valid_err_from.m`, `examples/multiframe_packet_parser.m`).
   - Rejects uncaught `from` error returns escaping to top-level callers (`test_banned_uncaught_err_from.m`).
-- [ ] **Task 2.5.3: Non-Escaping Function Blocks**
-  - Monomorphize function blocks; compile-time rejection of heap-escaping blocks.
+- [x] **Task 2.5.3: Non-Escaping Function Blocks [TDD Cycle 15]**
+  - Monomorphizes non-escaping `BlockExpr` closures (`^ret(args){...}`) into direct static C functions (`__veriobjc_mono_block_*`) with captured variables threaded as explicit parameters, eliminating `_NSConcreteStackBlock` and `_NSConcreteGlobalBlock` (`test_valid_function_block.m`, `examples/non_escaping_block_pipeline.m`).
+  - Statically rejects escaping function blocks in global variables, struct/class fields, assignments, or return values (`test_banned_escaping_block.m`).
 - [ ] **Task 2.5.4: Constrained Generics (`vgeneric`) Definition-Site Checking**
   - Check constraints once at definition site; prevent template explosion.
 - [ ] **Task 2.5.5: Fueled Interpreter for `vconstexpr`**

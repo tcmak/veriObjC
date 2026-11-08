@@ -23,6 +23,10 @@ ll/
 │   ├── buf/           # Descriptor-based buffer pools, zero-copy views  
 │   ├── bypass/        # ef\_vi / AF\_XDP / DPDK batch RX/TX concepts  
 │   └── loopback/      # In-process simulation loopback transport  
+├── ll.ml/             # Neural Inference Substrate (veriStream)  
+│   ├── tern/          # Ternary weights {-1,0,1}: Bits(2) codes, packed 4/byte, popcount kernels  
+│   ├── stream/        # Bits<W> wires, Stream<T,N> per-clock flows, reduce trees  
+│   └── model/         # MatMul-free blocks: token shift, GLU mux gates, shifted RMSNorm  
 └── ll.telemetry/      # Real-Time Observability  
 ├── histogram/     # HDR-style, fixed-bucket, rescale-free  
 └── trace/         # Timestamped span records written via ll.core.tape
@@ -198,6 +202,37 @@ Standard blocking POSIX socket operations (`read()`, `write()`) are prohibited a
 
 ---
 
+## 🧮 6. Neural Inference Substrate: `veriStream` (`ll.ml/` / `<vstd/stream.h>`)
+
+**Hardware-native streams for MatMul-free AI.**
+
+- **Inspired by:** BitNet b1.58 and the Scalable MatMul-free Language Modeling line of work — ternary-weight LLMs whose "multiplications" are really additions. That paper's own FPGA implementation reports ternary matrix multiplication dominating token-generation latency; `veriStream` exists to make that kernel pure LUT logic.
+- **The Concept:** MatMul-free models remove multipliers from the *math*; `veriStream` removes them from the *hardware*. It provides the two primitives missing from C++/Java/ObjC:
+  - **`Bits<W>`** — a fixed-width wire, `W` a `vconstexpr` parameter. `popcount`, `mux`, shifts, adds: branchless by construction, zero-cost, the flat-value idea taken to single wires. Signed 8-bit activations (BitNet-style absmax quantization) are the default payload type.
+  - **`Stream<T, N>`** — **N values per clock**. A stream is not an array: it is 2048 wires arriving every cycle. No memory, no addresses, no capacity, no bounds to check.
+- **The core operation — `ternary_select`:** `y += (w == 1 ? x : w == -1 ? -x : 0)`. The plugin proves both branch sides (the `--branch-report` machinery, applied to dataflow) and lowers it to a **CMUX ladder — never a branch**, with accumulation lowered to **pipelined adder trees plus popcount reduction** (`sum = popcount(lanes where w=+1) − popcount(lanes where w=−1)`). The multiply never exists, so **no DSP blocks are instantiated**.
+- **`reduceTree` is structure, not code:** reducing a `Stream<T, N>` elaborates to `log2(N)` stages of registers. A 512-wide ternary dot product is 512 mux lanes feeding a 9-stage tree: latency exactly 9 cycles, throughput one result per cycle, and the pipeline depth is **part of the type's contract** — so the model-graph scheduler (§2, Fixed Task DAGs) knows every kernel's cycle cost. **WCET in clock cycles**: the language's timing promise at its strongest — a cycle count, not a measurement.
+- **Module structure:**
+  - **`Bits`** — `Bits(8)`, `Bits(16)`, `popcount`, `mux`, shifts; every operation is a wire op.
+  - **`Ternary`** — the closed 3-value set {-1, 0, 1} encoded in `Bits(2)`; weights stored **packed, 4 weights per byte**, as `consteval` tables pinned in BRAM (read-only, flat, loaded once — the tape/`from_bytes` substrate verifies the weight image before it becomes hardware-visible).
+  - **`Stream`** — `Stream(T, N)`, `zip` (equal-N pairs checked at compile time), `map` (elaborates **N parallel hardware copies** — an instantiation, counted against the LUT budget), `reduceTree` (`log2(N)` registered stages).
+  - **`model/`** — the MatMul-free blocks: token shift is a register-delayed stream; GLU gates are stream muxes; RMSNorm uses scales **`consteval`-rounded to powers of two**, so every normalization compiles to a shift; the KV cache is a pre-banked BRAM arena with a declared `ContextCap` — **exceeding the context window is a compile error, not a runtime failure**; adder-tree saturation is *proven* (`vconstexpr` computes the accumulator width so overflow cannot happen; `@pre` checks close the residual cases).
+- **Zero multipliers is a CI-asserted claim, not a marketing line:** the vendor synthesis flow (HLS consumes the C that VeriObjC lowers to) runs as a build-time tool, and **`--hw-report` applies the survivor-report pattern to fabric resources** — LUTs, FFs, BRAMs, DSPs per kernel, budgeted in the manifest like monomorphized code. The acceptance criterion: **DSP count = 0 in the synthesis report, or the build fails**.
+- **Honest boundaries:** (1) The fabric toolchain is the unproven foreign layer — a build-time effect, never on the constrained path; the reports make its output *auditable*, not proven. (2) Resource utilization is data (per-vendor, per-part), not theorem — the theorem is *cycles*; the resources are budgeted and reported. (3) Training, tokenization, and model tooling are hosted `@cold` code; only the inference DAG is a constrained path — and the closed world schedules it entirely at compile time, one kernel per stage, cycle counts committed in the manifest.
+  ```objc
+  // 512-wide ternary dot: 512 CMUX lanes + a 9-stage adder tree.
+  consteval auto W = 512;
+  typedef Stream<Bits(8), W> ActivationStream;       // 512 wires, every cycle
+
+  consteval auto weights = ternary_packed<W>(model); // 4 weights per byte, BRAM-pinned
+
+  ActivationStream out = ternary_dot<weights>(activations);
+  // Lowered: MUX ladder -> popcount reduction -> log2(512) = 9 registered stages.
+  // Contract: @latency(cycles = 9) @throughput(1 per cycle) — provable, not measured.
+  ```
+
+---
+
 ## 🛟 Appendix: The Escape Hatch Subsystem (`@cold`)
 
 To protect the core mathematical verification engine while acknowledging real-world diagnostics, VeriObjC implements an isolated execution layer:
@@ -227,3 +262,4 @@ To protect the core mathematical verification engine while acknowledging real-wo
 | **`vvariant` + `match`**            | `std::variant`/`std::visit` + Goose enums        | Class-hierarchy bloat for closed sets     | Exhaustive jump-table dispatch; packed variant-sized storage.                 |
 | **`vgeneric` + `--mono-report`**    | C++ templates, done safely                       | Template explosion / compiler OOM         | Definition-site checked generics; budgeted, deduplicated instantiation.       |
 | **`vregex` compile-time regex**     | RE2 linear-time + Lex/Ragel compile-to-DFA       | Backtracking engines (exponential worst case, heap, runtime compilation) | `consteval` DFA table in `.rodata`; one load per byte; WCET = cap × 1 load.   |
+| **`veriStream` (`ll.ml/`)**         | BitNet b1.58 + MatMul-free LM (ternary kernels)  | Multiplier/DSP-bound matmul inference     | `Bits<W>` + `Stream<T,N>`; `ternary_select` → MUX + adder trees + popcount; 1.58-bit LLM inference in pure LUT logic; **DSP count = 0, CI-asserted**. |

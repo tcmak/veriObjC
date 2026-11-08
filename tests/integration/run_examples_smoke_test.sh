@@ -30,16 +30,16 @@ for m_file in "$REPO_ROOT"/examples/*.m; do
     base_name=$(basename "$m_file")
     echo "[RUN] Objective-C Example: $base_name"
 
-    clang-23 -O2 -Werror \
+    clang-23 -O2 -Werror -fblocks \
              -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
              -c "$m_file" \
              -o "$TMP_OBJ"
 
-    # Verify zero dynamic dispatch references (objc_msgSend / objc_msg_lookup)
-    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup"; then
-        echo "[FAIL] $base_name emitted forbidden dynamic dispatch symbol (objc_msgSend / objc_msg_lookup)!"
+    # Verify zero dynamic dispatch or block runtime references
+    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
+        echo "[FAIL] $base_name emitted forbidden dynamic dispatch or block runtime symbol!"
         nm "$TMP_OBJ"
         exit 1
     fi
