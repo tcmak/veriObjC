@@ -20,6 +20,7 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,229 @@ private:
     llvm::DenseMap<const VarDecl *, FunctionDecl *> MonomorphizedBlocks;
     llvm::DenseMap<const VarDecl *, llvm::SmallVector<VarDecl *, 4>> BlockCapturedVars;
     unsigned MonoBlockCounter = 0;
+    std::map<std::pair<const FunctionDecl *, std::vector<int64_t>>, int64_t> VConstexprMemo;
+
+    struct VConstexprState {
+        static constexpr unsigned MAX_STEPS = 4096;
+        static constexpr unsigned MAX_DEPTH = 64;
+        unsigned StepsUsed = 0;
+        unsigned MaxDepthSeen = 0;
+        bool FuelExhausted = false;
+        const FunctionDecl *ActiveFD = nullptr;
+    };
+
+    bool consumeFuel(VConstexprState &State, unsigned Depth) {
+        if (Depth > State.MaxDepthSeen) {
+            State.MaxDepthSeen = Depth;
+        }
+        State.StepsUsed++;
+        if (State.StepsUsed > VConstexprState::MAX_STEPS || Depth > VConstexprState::MAX_DEPTH) {
+            State.FuelExhausted = true;
+            return false;
+        }
+        return true;
+    }
+
+    bool evalVConstexprExpr(
+        const Expr *E,
+        llvm::DenseMap<const VarDecl *, int64_t> &Env,
+        VConstexprState &State,
+        unsigned Depth,
+        int64_t &OutVal
+    ) {
+        if (!E || State.FuelExhausted) return false;
+        if (!consumeFuel(State, Depth)) return false;
+
+        E = E->IgnoreParenImpCasts();
+
+        if (const auto *IL = dyn_cast<IntegerLiteral>(E)) {
+            OutVal = IL->getValue().getSExtValue();
+            return true;
+        }
+        if (const auto *DRE = dyn_cast<DeclRefExpr>(E)) {
+            if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+                auto It = Env.find(VD);
+                if (It != Env.end()) {
+                    OutVal = It->second;
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (const auto *UO = dyn_cast<UnaryOperator>(E)) {
+            int64_t Sub = 0;
+            if (!evalVConstexprExpr(UO->getSubExpr(), Env, State, Depth, Sub)) return false;
+            switch (UO->getOpcode()) {
+                case UO_Minus: OutVal = -Sub; return true;
+                case UO_Plus:  OutVal = +Sub; return true;
+                case UO_Not:   OutVal = ~Sub; return true;
+                case UO_LNot:  OutVal = !Sub ? 1 : 0; return true;
+                default: return false;
+            }
+        }
+        if (const auto *BO = dyn_cast<BinaryOperator>(E)) {
+            if (BO->getOpcode() == BO_Assign) {
+                const auto *LHSRef = dyn_cast<DeclRefExpr>(BO->getLHS()->IgnoreParenImpCasts());
+                const auto *VD = LHSRef ? dyn_cast<VarDecl>(LHSRef->getDecl()) : nullptr;
+                if (!VD) return false;
+                int64_t RHS = 0;
+                if (!evalVConstexprExpr(BO->getRHS(), Env, State, Depth, RHS)) return false;
+                Env[VD] = RHS;
+                OutVal = RHS;
+                return true;
+            }
+            int64_t L = 0, R = 0;
+            if (!evalVConstexprExpr(BO->getLHS(), Env, State, Depth, L)) return false;
+            if (!evalVConstexprExpr(BO->getRHS(), Env, State, Depth, R)) return false;
+            switch (BO->getOpcode()) {
+                case BO_Add: OutVal = L + R; return true;
+                case BO_Sub: OutVal = L - R; return true;
+                case BO_Mul: OutVal = L * R; return true;
+                case BO_Div: if (R == 0) return false; OutVal = L / R; return true;
+                case BO_Rem: if (R == 0) return false; OutVal = L % R; return true;
+                case BO_Shl: OutVal = L << R; return true;
+                case BO_Shr: OutVal = L >> R; return true;
+                case BO_And: OutVal = L & R; return true;
+                case BO_Xor: OutVal = L ^ R; return true;
+                case BO_Or:  OutVal = L | R; return true;
+                case BO_LT:  OutVal = (L < R) ? 1 : 0; return true;
+                case BO_GT:  OutVal = (L > R) ? 1 : 0; return true;
+                case BO_LE:  OutVal = (L <= R) ? 1 : 0; return true;
+                case BO_GE:  OutVal = (L >= R) ? 1 : 0; return true;
+                case BO_EQ:  OutVal = (L == R) ? 1 : 0; return true;
+                case BO_NE:  OutVal = (L != R) ? 1 : 0; return true;
+                case BO_LAnd: OutVal = (L && R) ? 1 : 0; return true;
+                case BO_LOr:  OutVal = (L || R) ? 1 : 0; return true;
+                default: return false;
+            }
+        }
+        if (const auto *CE = dyn_cast<CallExpr>(E)) {
+            if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
+                if (hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr") && CalleeFD->hasBody()) {
+                    std::vector<int64_t> ArgVals;
+                    for (unsigned i = 0; i < CE->getNumArgs(); ++i) {
+                        int64_t V = 0;
+                        if (!evalVConstexprExpr(CE->getArg(i), Env, State, Depth, V)) {
+                            return false;
+                        }
+                        ArgVals.push_back(V);
+                    }
+                    return evalVConstexprCall(CalleeFD, ArgVals, State, Depth + 1, OutVal);
+                }
+            }
+        }
+        return false;
+    }
+
+    bool evalVConstexprStmt(
+        const Stmt *S,
+        llvm::DenseMap<const VarDecl *, int64_t> &Env,
+        VConstexprState &State,
+        unsigned Depth,
+        bool &HasReturned,
+        int64_t &RetVal
+    ) {
+        if (!S || State.FuelExhausted) return false;
+        if (!consumeFuel(State, Depth)) return false;
+
+        if (const auto *CS = dyn_cast<CompoundStmt>(S)) {
+            for (const Stmt *Child : CS->body()) {
+                if (!evalVConstexprStmt(Child, Env, State, Depth, HasReturned, RetVal)) {
+                    return false;
+                }
+                if (HasReturned) return true;
+            }
+            return true;
+        }
+        if (const auto *DS = dyn_cast<DeclStmt>(S)) {
+            for (const Decl *D : DS->decls()) {
+                if (const auto *VD = dyn_cast<VarDecl>(D)) {
+                    int64_t InitVal = 0;
+                    if (VD->getInit()) {
+                        if (!evalVConstexprExpr(VD->getInit(), Env, State, Depth, InitVal)) {
+                            return false;
+                        }
+                    }
+                    Env[VD] = InitVal;
+                }
+            }
+            return true;
+        }
+        if (const auto *RS = dyn_cast<ReturnStmt>(S)) {
+            if (RS->getRetValue()) {
+                if (!evalVConstexprExpr(RS->getRetValue(), Env, State, Depth, RetVal)) {
+                    return false;
+                }
+            }
+            HasReturned = true;
+            return true;
+        }
+        if (const auto *IS = dyn_cast<IfStmt>(S)) {
+            int64_t Cond = 0;
+            if (!evalVConstexprExpr(IS->getCond(), Env, State, Depth, Cond)) return false;
+            if (Cond != 0) {
+                return evalVConstexprStmt(IS->getThen(), Env, State, Depth, HasReturned, RetVal);
+            } else if (IS->getElse()) {
+                return evalVConstexprStmt(IS->getElse(), Env, State, Depth, HasReturned, RetVal);
+            }
+            return true;
+        }
+        if (const auto *WS = dyn_cast<WhileStmt>(S)) {
+            while (true) {
+                int64_t Cond = 0;
+                if (!evalVConstexprExpr(WS->getCond(), Env, State, Depth, Cond)) return false;
+                if (Cond == 0) break;
+                if (!evalVConstexprStmt(WS->getBody(), Env, State, Depth, HasReturned, RetVal)) return false;
+                if (HasReturned) return true;
+            }
+            return true;
+        }
+        if (const auto *E = dyn_cast<Expr>(S)) {
+            int64_t Unused = 0;
+            return evalVConstexprExpr(E, Env, State, Depth, Unused);
+        }
+        return false;
+    }
+
+    bool evalVConstexprCall(
+        const FunctionDecl *FD,
+        const std::vector<int64_t> &Args,
+        VConstexprState &State,
+        unsigned Depth,
+        int64_t &OutVal
+    ) {
+        State.ActiveFD = FD;
+        if (!consumeFuel(State, Depth)) return false;
+
+        auto MemoKey = std::make_pair(FD->getCanonicalDecl(), Args);
+        auto MemoIt = VConstexprMemo.find(MemoKey);
+        if (MemoIt != VConstexprMemo.end()) {
+            OutVal = MemoIt->second;
+            return true;
+        }
+
+        const FunctionDecl *DefFD = FD->getDefinition() ? FD->getDefinition() : FD;
+        if (!DefFD->hasBody() || Args.size() != DefFD->getNumParams()) {
+            return false;
+        }
+
+        llvm::DenseMap<const VarDecl *, int64_t> Env;
+        for (size_t i = 0; i < Args.size(); ++i) {
+            Env[DefFD->getParamDecl(i)] = Args[i];
+        }
+
+        bool HasReturned = false;
+        int64_t RetVal = 0;
+        if (!evalVConstexprStmt(DefFD->getBody(), Env, State, Depth, HasReturned, RetVal)) {
+            return false;
+        }
+        if (!HasReturned) {
+            return false;
+        }
+        VConstexprMemo[MemoKey] = RetVal;
+        OutVal = RetVal;
+        return true;
+    }
 
     void reportEscapingBlock(SourceLocation Loc) {
         DiagnosticsEngine &Diag = Context->getDiagnostics();
@@ -701,6 +925,42 @@ private:
                         Child = CE->getArg(0);
                         continue;
                     }
+                    if (hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr")) {
+                        std::vector<int64_t> ArgVals;
+                        bool AllConstArgs = true;
+                        llvm::DenseMap<const VarDecl *, int64_t> EmptyEnv;
+                        VConstexprState ArgState;
+                        for (unsigned i = 0; i < CE->getNumArgs(); ++i) {
+                            int64_t V = 0;
+                            if (!evalVConstexprExpr(CE->getArg(i), EmptyEnv, ArgState, 1, V)) {
+                                AllConstArgs = false;
+                                break;
+                            }
+                            ArgVals.push_back(V);
+                        }
+                        if (AllConstArgs) {
+                            VConstexprState EvalState;
+                            int64_t ResultVal = 0;
+                            bool Ok = evalVConstexprCall(CalleeFD, ArgVals, EvalState, 1, ResultVal);
+                            if (EvalState.FuelExhausted) {
+                                DiagnosticsEngine &Diag = Context->getDiagnostics();
+                                unsigned DiagID = Diag.getCustomDiagID(
+                                    DiagnosticsEngine::Error,
+                                    "VeriObjC Violation: vconstexpr evaluation of '%0' exhausted compile-time fuel budget (%1 steps, depth %2)."
+                                );
+                                const FunctionDecl *BlameFD = EvalState.ActiveFD ? EvalState.ActiveFD : CalleeFD;
+                                Diag.Report(CE->getExprLoc(), DiagID)
+                                    << BlameFD->getName() << EvalState.StepsUsed << EvalState.MaxDepthSeen;
+                                continue;
+                            }
+                            if (Ok && CE->getType()->isIntegerType()) {
+                                unsigned BitWidth = Context->getTypeSize(CE->getType());
+                                llvm::APInt APVal(BitWidth, (uint64_t)ResultVal, CE->getType()->isSignedIntegerType());
+                                Child = IntegerLiteral::Create(*Context, APVal, CE->getType(), CE->getExprLoc());
+                                continue;
+                            }
+                        }
+                    }
                 } else if (Expr *Callee = CE->getCallee()) {
                     Callee = Callee->IgnoreParenImpCasts();
                     if (auto *DRE = dyn_cast<DeclRefExpr>(Callee)) {
@@ -1220,6 +1480,22 @@ struct ObjCFlatAttrInfo : public ParsedAttrInfo {
     }
 };
 
+struct ObjCVConstexprAttrInfo : public ParsedAttrInfo {
+    ObjCVConstexprAttrInfo() {
+        OptArgs = 0;
+        static constexpr Spelling S[] = {
+            {ParsedAttr::AS_GNU, "objc_vconstexpr"},
+            {ParsedAttr::AS_C23, "objc_vconstexpr"},
+            {ParsedAttr::AS_CXX11, "objc_vconstexpr"}
+        };
+        Spellings = S;
+    }
+    AttrHandling handleDeclAttribute(Sema &S, Decl *D, const ParsedAttr &Attr) const override {
+        D->addAttr(AnnotateAttr::Create(S.Context, "objc_vconstexpr", nullptr, 0, Attr.getRange()));
+        return AttributeApplied;
+    }
+};
+
 } // namespace
 
 
@@ -1236,6 +1512,9 @@ static ParsedAttrInfoRegistry::Add<ObjCConsumedAttrInfo> AttrConsumed(
 );
 static ParsedAttrInfoRegistry::Add<ObjCFlatAttrInfo> AttrFlat(
     "objc_flat", "Enforce VeriObjC flat-value struct layout (no pointers at any depth)"
+);
+static ParsedAttrInfoRegistry::Add<ObjCVConstexprAttrInfo> AttrVConstexpr(
+    "objc_vconstexpr", "Mark function for fuel-bounded compile-time evaluation (vconstexpr)"
 );
 static FrontendPluginRegistry::Add<VeriObjCAction> X(
 

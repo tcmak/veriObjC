@@ -152,8 +152,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.4: Constrained Generics (`vgeneric`) Definition-Site Checking [TDD Cycle 16]**
   - Enforces explicit sealed constraint bounds (`<T : SealedBound *>`) on all generic type parameters (`ObjCTypeParamList`) at the definition site and devirtualizes constraint method calls (`test_valid_constrained_generic.m`, `examples/constrained_generic_vault.m`).
   - Rejects unconstrained generic parameters or unsealed constraint bounds (`test_banned_unconstrained_generic.m`).
-- [ ] **Task 2.5.5: Fueled Interpreter for `vconstexpr`**
-  - Fuel counter (max steps / recursion depth); clean diagnostics on exhaustion.
+- [x] **Task 2.5.5: Fueled Interpreter for `vconstexpr` [TDD Cycle 17]**
+  - Implemented AST-level fuel-bounded interpreter (`evalVConstexprCall`, `MAX_STEPS = 4096`, `MAX_DEPTH = 64`) with program-wide memoization (`VConstexprMemo`) and constant folding into `IntegerLiteral` (`test_valid_vconstexpr.m`, `examples/vconstexpr_tick_table.m`).
+  - Cleanly aborts compilation naming the offending function, steps consumed, and recursion depth when fuel is exhausted (`test_banned_vconstexpr_fuel.m`).
 - [ ] **Task 2.5.6: Compile-Time Regex (`vregex`) to DFA in `.rodata`**
   - Subset construction and Hopcroft minimization into static lookup table.
 

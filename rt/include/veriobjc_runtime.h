@@ -355,6 +355,14 @@ static inline int32_t __veriobjc_return_err_from(int32_t err_code, const char *t
     return __veriobjc_return_err_from((err_code), #target_frame)
 
 // ---------------------------------------------------------------------------
+// Fueled Compile-Time Evaluation (vconstexpr)
+// ---------------------------------------------------------------------------
+
+#ifndef vconstexpr
+#define vconstexpr __attribute__((objc_vconstexpr)) static inline
+#endif
+
+// ---------------------------------------------------------------------------
 // Lock-Free Single-Producer Single-Consumer Flat-Value Channel Stub
 // ---------------------------------------------------------------------------
 
