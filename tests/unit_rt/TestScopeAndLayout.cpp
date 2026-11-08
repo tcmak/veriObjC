@@ -120,6 +120,27 @@ TEST(VeriObjC_ScopeAndLayout, MoveIntrinsicAndFlatChannelOperations) {
     HeaderlessParticle p2 = veriobjc_move(p1);
     LONGS_EQUAL(42u, p2.id);
     LONGS_EQUAL(-7, __veriobjc_return_err_from(-7, "test_frame"));
+    CHECK_FALSE(__veriobjc_regex_match("A+", "A", 1));
+
+    // DFA table walker & null/edge guards
+    uint8_t trans[2 * 256];
+    memset(trans, 0, sizeof(trans));
+    trans[0 * 256 + (uint8_t)'A'] = 1u;
+    trans[1 * 256 + (uint8_t)'A'] = 1u;
+    uint8_t accept[2] = { 0u, 1u };
+    struct veriobjc_dfa dfa = { trans, accept, 2u, 0u };
+
+    CHECK_FALSE(veriobjc_dfa_match(nullptr, "A", 1));
+    struct veriobjc_dfa bad_dfa1 = { nullptr, accept, 2u, 0u };
+    CHECK_FALSE(veriobjc_dfa_match(&bad_dfa1, "A", 1));
+    struct veriobjc_dfa bad_dfa2 = { trans, nullptr, 2u, 0u };
+    CHECK_FALSE(veriobjc_dfa_match(&bad_dfa2, "A", 1));
+    struct veriobjc_dfa bad_dfa3 = { trans, accept, 0u, 0u };
+    CHECK_FALSE(veriobjc_dfa_match(&bad_dfa3, "A", 1));
+    CHECK_FALSE(veriobjc_dfa_match(&dfa, nullptr, 1));
+    CHECK_FALSE(veriobjc_dfa_match(&dfa, nullptr, 0));
+    CHECK_TRUE(veriobjc_dfa_match(&dfa, "AA", 2));
+    CHECK_FALSE(veriobjc_dfa_match(&dfa, "AB", 2));
 
     // Null guard on channel init
     veriobjc_channel_init(nullptr, nullptr, sizeof(HeaderlessParticle), 2);

@@ -8,7 +8,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Phase 0 & Phase 1 Complete (100% Region, Function & Branch Coverage) — Phase 2 in progress
+* **Overall Status:** Phase 0, Phase 1 & Phase 2 Complete (100% Region, Function & Branch Coverage on `rt/`; 100% Plugin & Examples Smoke Suites Passing)
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`/usr/bin/clang-23`)
 * **Test Framework:** CppUTest (`/home/user/cpputest`)
 * **Build System:** CMake + Make / Ninja
@@ -155,8 +155,24 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.5: Fueled Interpreter for `vconstexpr` [TDD Cycle 17]**
   - Implemented AST-level fuel-bounded interpreter (`evalVConstexprCall`, `MAX_STEPS = 4096`, `MAX_DEPTH = 64`) with program-wide memoization (`VConstexprMemo`) and constant folding into `IntegerLiteral` (`test_valid_vconstexpr.m`, `examples/vconstexpr_tick_table.m`).
   - Cleanly aborts compilation naming the offending function, steps consumed, and recursion depth when fuel is exhausted (`test_banned_vconstexpr_fuel.m`).
-- [ ] **Task 2.5.6: Compile-Time Regex (`vregex`) to DFA in `.rodata`**
-  - Subset construction and Hopcroft minimization into static lookup table.
+- [x] **Task 2.5.6: Compile-Time Regex (`vregex`) to DFA in `.rodata` [TDD Cycle 18]**
+  - Implemented Thompson NFA construction, Powerset Subset Construction, and Hopcroft Equivalence-Class Minimization inside `VeriObjCPlugin.cpp` (`compileRegexToMinimizedDFA`), lowering `vregex_match(pattern, input, len)` into `.rodata` transition tables (`__veriobjc_dfa_trans_*`) and branchless O(1)-per-byte `veriobjc_dfa_match` calls (`test_valid_vregex.m`, `examples/fix_protocol_dfa_router.m`).
+  - Statically rejects backreferences (`\1`..`\9`), lookaround assertions (`(?=`, `(?!`), and excessive group nesting (`test_banned_backref_regex.m`).
+
+### 2.6 Hardware Stream Elaboration (`veriStream`)
+*(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — Neural Inference Substrate)*
+
+- [ ] **Task 2.6.1: Wire-Level Stream Types (`Bits<W>` / `Stream<T, N>`)**
+  - `W` and `N` as compile-time value parameters (`vconstexpr` — depends on Task 2.5.5).
+  - `Stream<T, N>` type-checked as flat wire-level values: no memory, no addresses, no capacity, no bounds checks.
+  - Reject width-mismatched `zip` at compile time (`test_banned_stream_width_mismatch.m`).
+- [ ] **Task 2.6.2: `ternary_select` → CMUX Ladder + Popcount Adder Trees**
+  - Lower `y += (w == 1 ? x : w == -1 ? -x : 0)` to a MUX ladder — never a branch — with accumulation as popcount reduction (`sum = popcount(w=+1 lanes) − popcount(w=−1 lanes)`).
+  - Lower `reduceTree` to `log2(N)` registered stages; pipeline depth carried as a type-level latency contract visible to the model-graph scheduler (Fixed Task DAG machinery).
+  - Positive/negative tests: `test_valid_ternary_dot.m`, `examples/ternary_glu_block.m`.
+- [ ] **Task 2.6.3: Elaboration Budgets & `--hw-report`**
+  - Elaborate `map` as N parallel hardware copies counted against a manifest-declared LUT budget (same budget machinery as `--mono-report`).
+  - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel; **fail the build if the post-synthesis vendor report shows any DSP block instantiated**.
 
 ---
 
@@ -179,6 +195,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - `vresult<T, E>` variant unions with required branch checking before access.
 - [ ] **Task 3.8: Concurrency & Linear Guards (`<vstd/channel.h>`, `<vstd/atomic.h>`)**
   - Lock-free SPSC flat-value channels and linear `vatomic<T>`.
+- [ ] **Task 3.9: Neural Inference Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
+  - Packed ternary weights {-1, 0, 1} as `Bits(2)` codes, 4 per byte, `consteval` tables pinned in BRAM; weight image verified via `from_bytes` on load.
+  - `ll.ml/model/` blocks: token shift (register-delayed stream), GLU mux gates, RMSNorm with power-of-two scales (shifts only), KV cache as pre-banked BRAM arena with declared `ContextCap` — overflow is a compile error (`test_banned_context_overflow.m`).
 
 ---
 
@@ -191,6 +210,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - `--effects-report`: per-line survivor report of effectful call sites.
   - `--branch-report`: classification of unproven data-dependent branches.
   - `--mono-report`: monomorphization byte budget and instantiation tracking.
+  - `--hw-report`: per-kernel fabric resource audit (LUTs/FFs/BRAMs/DSPs) with the zero-DSP synthesis gate.
 - [ ] **Task 4.3: Latency Budget Gates**
   - CI budget check: p50/p99 regression beyond noise band fails build.
 - [ ] **Task 4.4: Formal Math Proof Integration (SMACK / Z3)**
@@ -205,3 +225,6 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified disassembly and symbol tables contain **0 calls to `objc_msgSend` / `objc_msg_lookup`** and **0 undefined external symbols** in freestanding kernel mode.
 - [x] **Task 5.2: Round-Trip Snapshot Persistence**
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.
+- [ ] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
+  - Compile `examples/ternary_glu_block.m` through the HLS flow; assert the synthesis report shows **0 DSP blocks** and `ternary_dot<512>` elaborates to exactly `log2(512) = 9` reduce stages with `@latency(cycles = 9)`.
+  - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).

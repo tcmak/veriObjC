@@ -50,6 +50,13 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
     fi
+    if [[ "$(basename "$pos_file")" == "test_valid_vregex.m" ]]; then
+        if ! nm "$TMP_OBJ" | grep -q "__veriobjc_dfa_trans_"; then
+            echo "[FAIL] Expected lowered .rodata DFA transition table __veriobjc_dfa_trans_ in test_valid_vregex.m!"
+            nm "$TMP_OBJ"
+            exit 1
+        fi
+    fi
     echo "[PASS] Positive Test $(basename "$pos_file") succeeded (0 dynamic dispatch calls)."
 done
 
@@ -91,6 +98,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Generic type parameter"
     elif [[ "$base_name" == test_banned_vconstexpr_fuel* ]]; then
         EXPECTED_MSG="VeriObjC Violation: vconstexpr evaluation"
+    elif [[ "$base_name" == test_banned_backref_regex* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Banned backreference or lookaround in vregex pattern"
     fi
 
     OUTPUT=$(clang-23 -fblocks \

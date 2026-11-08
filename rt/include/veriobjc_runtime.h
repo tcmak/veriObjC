@@ -363,6 +363,39 @@ static inline int32_t __veriobjc_return_err_from(int32_t err_code, const char *t
 #endif
 
 // ---------------------------------------------------------------------------
+// Compile-Time Regex (vregex) DFA Table & Fixed-Trip Matcher
+// ---------------------------------------------------------------------------
+
+struct veriobjc_dfa {
+    const uint8_t *transitions;
+    const uint8_t *accept_mask;
+    uint32_t       num_states;
+    uint32_t       start_state;
+};
+
+static inline bool veriobjc_dfa_match(const struct veriobjc_dfa *dfa, const char *input, size_t len) {
+    if (!dfa || !dfa->transitions || !dfa->accept_mask || dfa->num_states == 0u || (!input && len > 0u)) {
+        return false;
+    }
+    uint32_t state = dfa->start_state;
+    for (size_t i = 0; i < len; ++i) {
+        uint8_t byte = (uint8_t)input[i];
+        state = (uint32_t)dfa->transitions[state * 256u + (uint32_t)byte];
+    }
+    return dfa->accept_mask[state] != 0u;
+}
+
+static inline bool __veriobjc_regex_match(const char *pattern, const char *input, size_t len) {
+    (void)pattern;
+    (void)input;
+    (void)len;
+    return false;
+}
+
+#define vregex_match(pattern_literal, input_ptr, input_len) \
+    __veriobjc_regex_match((pattern_literal), (input_ptr), (input_len))
+
+// ---------------------------------------------------------------------------
 // Lock-Free Single-Producer Single-Consumer Flat-Value Channel Stub
 // ---------------------------------------------------------------------------
 

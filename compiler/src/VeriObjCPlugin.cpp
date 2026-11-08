@@ -20,7 +20,9 @@
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
+#include <bitset>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -44,6 +46,523 @@ private:
     llvm::DenseMap<const VarDecl *, llvm::SmallVector<VarDecl *, 4>> BlockCapturedVars;
     unsigned MonoBlockCounter = 0;
     std::map<std::pair<const FunctionDecl *, std::vector<int64_t>>, int64_t> VConstexprMemo;
+    llvm::StringMap<VarDecl *> CompiledDFADecls;
+    std::vector<Decl *> SynthesizedVarDefs;
+    unsigned DFACounter = 0;
+
+    struct CompiledDFA {
+        uint32_t NumStates = 0;
+        uint32_t StartState = 0;
+        std::vector<uint8_t> Transitions; // NumStates * 256
+        std::vector<uint8_t> AcceptMask;  // NumStates
+    };
+
+    struct NFAState {
+        std::bitset<256> MatchBytes;
+        int NextOnByte = -1;
+        llvm::SmallVector<int, 2> Epsilons;
+    };
+
+    struct NFAFrag {
+        int Start = -1;
+        int Accept = -1;
+    };
+
+    static void addEpsilonClosure(
+        const std::vector<NFAState> &NFA,
+        std::set<int> &StateSet
+    ) {
+        llvm::SmallVector<int, 16> Work(StateSet.begin(), StateSet.end());
+        while (!Work.empty()) {
+            int s = Work.pop_back_val();
+            for (int nxt : NFA[s].Epsilons) {
+                if (StateSet.insert(nxt).second) {
+                    Work.push_back(nxt);
+                }
+            }
+        }
+    }
+
+    bool compileRegexToMinimizedDFA(
+        llvm::StringRef Pattern,
+        SourceLocation Loc,
+        CompiledDFA &OutDFA
+    ) {
+        DiagnosticsEngine &Diag = Context->getDiagnostics();
+
+        // 1. Check for banned backreferences (\1..\9) and lookaround ((?=, (?!, (?<=, (?<!)
+        for (size_t i = 0; i < Pattern.size(); ++i) {
+            if (Pattern[i] == '\\' && i + 1 < Pattern.size() &&
+                Pattern[i + 1] >= '1' && Pattern[i + 1] <= '9') {
+                unsigned DiagID = Diag.getCustomDiagID(
+                    DiagnosticsEngine::Error,
+                    "VeriObjC Violation: Banned backreference or lookaround in vregex pattern '%0'. Rewrite as a pure regular expression for O(1)-per-byte DFA execution."
+                );
+                Diag.Report(Loc, DiagID) << Pattern;
+                return false;
+            }
+            if (Pattern[i] == '(' && i + 1 < Pattern.size() && Pattern[i + 1] == '?') {
+                unsigned DiagID = Diag.getCustomDiagID(
+                    DiagnosticsEngine::Error,
+                    "VeriObjC Violation: Banned backreference or lookaround in vregex pattern '%0'. Rewrite as a pure regular expression for O(1)-per-byte DFA execution."
+                );
+                Diag.Report(Loc, DiagID) << Pattern;
+                return false;
+            }
+        }
+
+        // 2. Check group nesting depth <= 8 and balanced parentheses
+        int Depth = 0;
+        for (size_t i = 0; i < Pattern.size(); ++i) {
+            if (Pattern[i] == '\\') {
+                ++i;
+                continue;
+            }
+            if (Pattern[i] == '(') {
+                ++Depth;
+                if (Depth > 8) {
+                    unsigned DiagID = Diag.getCustomDiagID(
+                        DiagnosticsEngine::Error,
+                        "VeriObjC Violation: vregex pattern '%0' exceeds maximum group nesting depth (8) or has unbalanced parentheses."
+                    );
+                    Diag.Report(Loc, DiagID) << Pattern;
+                    return false;
+                }
+            } else if (Pattern[i] == ')') {
+                --Depth;
+                if (Depth < 0) {
+                    unsigned DiagID = Diag.getCustomDiagID(
+                        DiagnosticsEngine::Error,
+                        "VeriObjC Violation: vregex pattern '%0' exceeds maximum group nesting depth (8) or has unbalanced parentheses."
+                    );
+                    Diag.Report(Loc, DiagID) << Pattern;
+                    return false;
+                }
+            }
+        }
+        if (Depth != 0) {
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: vregex pattern '%0' exceeds maximum group nesting depth (8) or has unbalanced parentheses."
+            );
+            Diag.Report(Loc, DiagID) << Pattern;
+            return false;
+        }
+
+        // 3. Parse regex into Thompson NFA
+        std::vector<NFAState> NFA;
+        auto newState = [&]() -> int {
+            NFA.push_back(NFAState{});
+            return (int)NFA.size() - 1;
+        };
+
+        size_t Pos = 0;
+        std::function<NFAFrag()> parseAlt;
+        std::function<NFAFrag()> parseConcat;
+        std::function<NFAFrag()> parseRepeat;
+        std::function<NFAFrag()> parseAtom;
+
+        parseAtom = [&]() -> NFAFrag {
+            if (Pos < Pattern.size() && Pattern[Pos] == '(') {
+                ++Pos; // '('
+                NFAFrag Inner = parseAlt();
+                if (Pos < Pattern.size() && Pattern[Pos] == ')') {
+                    ++Pos;
+                }
+                return Inner;
+            }
+
+            std::bitset<256> CharSet;
+            if (Pos < Pattern.size() && Pattern[Pos] == '[') {
+                ++Pos;
+                bool Negate = false;
+                if (Pos < Pattern.size() && Pattern[Pos] == '^') {
+                    Negate = true;
+                    ++Pos;
+                }
+                while (Pos < Pattern.size() && Pattern[Pos] != ']') {
+                    uint8_t Lo = (uint8_t)Pattern[Pos++];
+                    if (Pos + 1 < Pattern.size() && Pattern[Pos] == '-' && Pattern[Pos + 1] != ']') {
+                        ++Pos; // '-'
+                        uint8_t Hi = (uint8_t)Pattern[Pos++];
+                        for (uint32_t c = Lo; c <= Hi; ++c) {
+                            CharSet.set(c);
+                        }
+                    } else {
+                        CharSet.set(Lo);
+                    }
+                }
+                if (Pos < Pattern.size() && Pattern[Pos] == ']') {
+                    ++Pos;
+                }
+                if (Negate) {
+                    CharSet.flip();
+                }
+            } else if (Pos < Pattern.size() && Pattern[Pos] == '.') {
+                ++Pos;
+                CharSet.set();
+            } else if (Pos < Pattern.size() && Pattern[Pos] == '\\' && Pos + 1 < Pattern.size()) {
+                ++Pos;
+                char Esc = Pattern[Pos++];
+                if (Esc == 'd') {
+                    for (uint32_t c = '0'; c <= '9'; ++c) CharSet.set(c);
+                } else if (Esc == 'w') {
+                    for (uint32_t c = '0'; c <= '9'; ++c) CharSet.set(c);
+                    for (uint32_t c = 'A'; c <= 'Z'; ++c) CharSet.set(c);
+                    for (uint32_t c = 'a'; c <= 'z'; ++c) CharSet.set(c);
+                    CharSet.set('_');
+                } else {
+                    CharSet.set((uint8_t)Esc);
+                }
+            } else if (Pos < Pattern.size()) {
+                CharSet.set((uint8_t)Pattern[Pos++]);
+            }
+
+            int S = newState();
+            int A = newState();
+            NFA[S].MatchBytes = CharSet;
+            NFA[S].NextOnByte = A;
+            return {S, A};
+        };
+
+        parseRepeat = [&]() -> NFAFrag {
+            NFAFrag Base = parseAtom();
+            while (Pos < Pattern.size() &&
+                   (Pattern[Pos] == '*' || Pattern[Pos] == '+' || Pattern[Pos] == '?')) {
+                char Op = Pattern[Pos++];
+                int S = newState();
+                int A = newState();
+                if (Op == '*') {
+                    NFA[S].Epsilons.push_back(Base.Start);
+                    NFA[S].Epsilons.push_back(A);
+                    NFA[Base.Accept].Epsilons.push_back(Base.Start);
+                    NFA[Base.Accept].Epsilons.push_back(A);
+                } else if (Op == '+') {
+                    NFA[S].Epsilons.push_back(Base.Start);
+                    NFA[Base.Accept].Epsilons.push_back(Base.Start);
+                    NFA[Base.Accept].Epsilons.push_back(A);
+                } else if (Op == '?') {
+                    NFA[S].Epsilons.push_back(Base.Start);
+                    NFA[S].Epsilons.push_back(A);
+                    NFA[Base.Accept].Epsilons.push_back(A);
+                }
+                Base = {S, A};
+            }
+            return Base;
+        };
+
+        parseConcat = [&]() -> NFAFrag {
+            if (Pos >= Pattern.size() || Pattern[Pos] == ')' || Pattern[Pos] == '|') {
+                int S = newState();
+                return {S, S};
+            }
+            NFAFrag Cur = parseRepeat();
+            while (Pos < Pattern.size() && Pattern[Pos] != ')' && Pattern[Pos] != '|') {
+                NFAFrag Next = parseRepeat();
+                NFA[Cur.Accept].Epsilons.push_back(Next.Start);
+                Cur.Accept = Next.Accept;
+            }
+            return Cur;
+        };
+
+        parseAlt = [&]() -> NFAFrag {
+            NFAFrag Left = parseConcat();
+            while (Pos < Pattern.size() && Pattern[Pos] == '|') {
+                ++Pos;
+                NFAFrag Right = parseConcat();
+                int S = newState();
+                int A = newState();
+                NFA[S].Epsilons.push_back(Left.Start);
+                NFA[S].Epsilons.push_back(Right.Start);
+                NFA[Left.Accept].Epsilons.push_back(A);
+                NFA[Right.Accept].Epsilons.push_back(A);
+                Left = {S, A};
+            }
+            return Left;
+        };
+
+        NFAFrag Root = parseAlt();
+
+        // 4. Subset Construction (NFA -> DFA) with state budget
+        static constexpr size_t MAX_DFA_STATES = 64;
+        std::map<std::set<int>, uint32_t> SubsetToID;
+        std::vector<std::set<int>> IDToSubset;
+        std::vector<std::array<uint32_t, 256>> RawTrans;
+        std::vector<uint8_t> RawAccept;
+
+        auto getOrAddSubset = [&](const std::set<int> &Sub) -> int32_t {
+            auto It = SubsetToID.find(Sub);
+            if (It != SubsetToID.end()) {
+                return (int32_t)It->second;
+            }
+            if (IDToSubset.size() >= MAX_DFA_STATES) {
+                return -1;
+            }
+            uint32_t NewID = (uint32_t)IDToSubset.size();
+            SubsetToID[Sub] = NewID;
+            IDToSubset.push_back(Sub);
+            RawTrans.emplace_back();
+            RawTrans.back().fill(0);
+            RawAccept.push_back(Sub.count(Root.Accept) ? 1u : 0u);
+            return (int32_t)NewID;
+        };
+
+        // State 0 is dead/sink state (empty set) to keep DFA complete
+        std::set<int> DeadSet;
+        getOrAddSubset(DeadSet);
+
+        std::set<int> StartSet = {Root.Start};
+        addEpsilonClosure(NFA, StartSet);
+        int32_t StartID = getOrAddSubset(StartSet);
+        if (StartID < 0) return false;
+
+        for (size_t idx = 0; idx < IDToSubset.size(); ++idx) {
+            std::set<int> CurSet = IDToSubset[idx];
+            if (CurSet.empty()) continue;
+            for (uint32_t b = 0; b < 256u; ++b) {
+                std::set<int> NextSet;
+                for (int ns : CurSet) {
+                    if (NFA[ns].NextOnByte >= 0 && NFA[ns].MatchBytes.test(b)) {
+                        NextSet.insert(NFA[ns].NextOnByte);
+                    }
+                }
+                if (!NextSet.empty()) {
+                    addEpsilonClosure(NFA, NextSet);
+                }
+                int32_t NextID = getOrAddSubset(NextSet);
+                if (NextID < 0) {
+                    unsigned DiagID = Diag.getCustomDiagID(
+                        DiagnosticsEngine::Error,
+                        "VeriObjC Violation: vregex pattern '%0' exceeded compile-time DFA state/byte budget."
+                    );
+                    Diag.Report(Loc, DiagID) << Pattern;
+                    return false;
+                }
+                RawTrans[idx][b] = (uint32_t)NextID;
+            }
+        }
+
+        // 5. Hopcroft Minimization (equivalence class refinement)
+        uint32_t NumRaw = (uint32_t)IDToSubset.size();
+        std::vector<uint32_t> ClassOf(NumRaw, 0);
+        uint32_t NumClasses = 1;
+        bool HasAccept = false, HasNonAccept = false;
+        for (uint32_t s = 0; s < NumRaw; ++s) {
+            if (RawAccept[s]) HasAccept = true;
+            else HasNonAccept = true;
+        }
+        if (HasAccept && HasNonAccept) {
+            NumClasses = 2;
+            for (uint32_t s = 0; s < NumRaw; ++s) {
+                ClassOf[s] = RawAccept[s] ? 1u : 0u;
+            }
+        }
+
+        bool Changed = true;
+        while (Changed) {
+            Changed = false;
+            std::map<std::pair<uint32_t, std::array<uint32_t, 256>>, uint32_t> SigToNewClass;
+            std::vector<uint32_t> NewClassOf(NumRaw, 0);
+            uint32_t NextClass = 0;
+            for (uint32_t s = 0; s < NumRaw; ++s) {
+                std::array<uint32_t, 256> TransClasses;
+                for (uint32_t b = 0; b < 256u; ++b) {
+                    TransClasses[b] = ClassOf[RawTrans[s][b]];
+                }
+                auto Key = std::make_pair(ClassOf[s], TransClasses);
+                auto It = SigToNewClass.find(Key);
+                if (It == SigToNewClass.end()) {
+                    SigToNewClass[Key] = NextClass;
+                    NewClassOf[s] = NextClass++;
+                } else {
+                    NewClassOf[s] = It->second;
+                }
+            }
+            if (NextClass != NumClasses) {
+                NumClasses = NextClass;
+                ClassOf = std::move(NewClassOf);
+                Changed = true;
+            }
+        }
+
+        OutDFA.NumStates = NumClasses;
+        OutDFA.StartState = ClassOf[(uint32_t)StartID];
+        OutDFA.Transitions.assign((size_t)NumClasses * 256u, 0u);
+        OutDFA.AcceptMask.assign(NumClasses, 0u);
+
+        for (uint32_t s = 0; s < NumRaw; ++s) {
+            uint32_t c = ClassOf[s];
+            OutDFA.AcceptMask[c] = RawAccept[s];
+            for (uint32_t b = 0; b < 256u; ++b) {
+                OutDFA.Transitions[(size_t)c * 256u + b] = (uint8_t)ClassOf[RawTrans[s][b]];
+            }
+        }
+        return true;
+    }
+
+    Expr *buildLoweredVRegexMatch(CallExpr *CE) {
+        if (!CE || CE->getNumArgs() < 3) return nullptr;
+        const auto *SL = dyn_cast<StringLiteral>(CE->getArg(0)->IgnoreParenImpCasts());
+        if (!SL) return nullptr;
+
+        llvm::StringRef Pattern = SL->getString();
+        SourceLocation Loc = CE->getExprLoc();
+
+        VarDecl *DFAObjVD = nullptr;
+        auto MemoIt = CompiledDFADecls.find(Pattern);
+        if (MemoIt != CompiledDFADecls.end()) {
+            DFAObjVD = MemoIt->second;
+        } else {
+            CompiledDFA DFA;
+            if (!compileRegexToMinimizedDFA(Pattern, Loc, DFA)) {
+                return nullptr;
+            }
+
+            DeclContext *TU = Context->getTranslationUnitDecl();
+            RecordDecl *DFAStructRD = nullptr;
+            for (Decl *D : TU->decls()) {
+                if (auto *RD = dyn_cast<RecordDecl>(D)) {
+                    if (RD->getName() == "veriobjc_dfa" && RD->isCompleteDefinition()) {
+                        DFAStructRD = RD;
+                        break;
+                    }
+                }
+            }
+            if (!DFAStructRD) return nullptr;
+
+            unsigned ID = DFACounter++;
+            QualType ConstUInt8Ty = Context->UnsignedCharTy.withConst();
+
+            // 1. static const uint8_t __veriobjc_dfa_trans_<ID>[NumStates * 256]
+            llvm::APInt TransLen(64, (uint64_t)DFA.Transitions.size());
+            QualType TransArrTy = Context->getConstantArrayType(
+                ConstUInt8Ty, TransLen, nullptr, ArraySizeModifier::Normal, 0
+            );
+            std::string TransName = "__veriobjc_dfa_trans_" + std::to_string(ID);
+            VarDecl *TransVD = VarDecl::Create(
+                *Context, TU, Loc, Loc, &Context->Idents.get(TransName),
+                TransArrTy, nullptr, SC_Static
+            );
+            TransVD->addAttr(UsedAttr::CreateImplicit(*Context));
+
+            std::vector<Expr *> TransInits;
+            TransInits.reserve(DFA.Transitions.size());
+            for (uint8_t v : DFA.Transitions) {
+                llvm::APInt Val(8, v);
+                TransInits.push_back(IntegerLiteral::Create(*Context, Val, Context->UnsignedCharTy, Loc));
+            }
+            auto *TransILE = new (*Context) InitListExpr(*Context, Loc, TransInits, Loc, true);
+            TransILE->setType(TransArrTy);
+            TransVD->setInit(TransILE);
+            TU->addDecl(TransVD);
+            SynthesizedVarDefs.push_back(TransVD);
+
+            // 2. static const uint8_t __veriobjc_dfa_accept_<ID>[NumStates]
+            llvm::APInt AcceptLen(64, (uint64_t)DFA.AcceptMask.size());
+            QualType AcceptArrTy = Context->getConstantArrayType(
+                ConstUInt8Ty, AcceptLen, nullptr, ArraySizeModifier::Normal, 0
+            );
+            std::string AcceptName = "__veriobjc_dfa_accept_" + std::to_string(ID);
+            VarDecl *AcceptVD = VarDecl::Create(
+                *Context, TU, Loc, Loc, &Context->Idents.get(AcceptName),
+                AcceptArrTy, nullptr, SC_Static
+            );
+            AcceptVD->addAttr(UsedAttr::CreateImplicit(*Context));
+
+            std::vector<Expr *> AcceptInits;
+            AcceptInits.reserve(DFA.AcceptMask.size());
+            for (uint8_t v : DFA.AcceptMask) {
+                llvm::APInt Val(8, v);
+                AcceptInits.push_back(IntegerLiteral::Create(*Context, Val, Context->UnsignedCharTy, Loc));
+            }
+            auto *AcceptILE = new (*Context) InitListExpr(*Context, Loc, AcceptInits, Loc, true);
+            AcceptILE->setType(AcceptArrTy);
+            AcceptVD->setInit(AcceptILE);
+            TU->addDecl(AcceptVD);
+            SynthesizedVarDefs.push_back(AcceptVD);
+
+            // 3. static const struct veriobjc_dfa __veriobjc_dfa_obj_<ID>
+            QualType DFAStructTy = Context->getTypeDeclType(static_cast<const TypeDecl *>(DFAStructRD)).withConst();
+            std::string ObjName = "__veriobjc_dfa_obj_" + std::to_string(ID);
+            DFAObjVD = VarDecl::Create(
+                *Context, TU, Loc, Loc, &Context->Idents.get(ObjName),
+                DFAStructTy, nullptr, SC_Static
+            );
+            DFAObjVD->addAttr(UsedAttr::CreateImplicit(*Context));
+
+            QualType ConstUInt8PtrTy = Context->getPointerType(ConstUInt8Ty);
+            DeclRefExpr *TransRef = DeclRefExpr::Create(
+                *Context, NestedNameSpecifierLoc(), SourceLocation(),
+                TransVD, false, Loc, TransArrTy, VK_LValue
+            );
+            ImplicitCastExpr *TransDecay = ImplicitCastExpr::Create(
+                *Context, ConstUInt8PtrTy, CK_ArrayToPointerDecay,
+                TransRef, nullptr, VK_PRValue, FPOptionsOverride()
+            );
+
+            DeclRefExpr *AcceptRef = DeclRefExpr::Create(
+                *Context, NestedNameSpecifierLoc(), SourceLocation(),
+                AcceptVD, false, Loc, AcceptArrTy, VK_LValue
+            );
+            ImplicitCastExpr *AcceptDecay = ImplicitCastExpr::Create(
+                *Context, ConstUInt8PtrTy, CK_ArrayToPointerDecay,
+                AcceptRef, nullptr, VK_PRValue, FPOptionsOverride()
+            );
+
+            llvm::APInt NumStatesVal(32, DFA.NumStates);
+            llvm::APInt StartStateVal(32, DFA.StartState);
+            Expr *ObjFields[4] = {
+                TransDecay,
+                AcceptDecay,
+                IntegerLiteral::Create(*Context, NumStatesVal, Context->UnsignedIntTy, Loc),
+                IntegerLiteral::Create(*Context, StartStateVal, Context->UnsignedIntTy, Loc)
+            };
+            auto *ObjILE = new (*Context) InitListExpr(*Context, Loc, ObjFields, Loc, true);
+            ObjILE->setType(DFAStructTy);
+            DFAObjVD->setInit(ObjILE);
+            TU->addDecl(DFAObjVD);
+            SynthesizedVarDefs.push_back(DFAObjVD);
+
+            CompiledDFADecls[Pattern] = DFAObjVD;
+        }
+
+        // Find veriobjc_dfa_match FunctionDecl
+        FunctionDecl *MatchFD = nullptr;
+        for (Decl *D : Context->getTranslationUnitDecl()->decls()) {
+            if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+                if (FD->getName() == "veriobjc_dfa_match") {
+                    MatchFD = FD;
+                    break;
+                }
+            }
+        }
+        if (!MatchFD || !DFAObjVD) return nullptr;
+
+        DeclRefExpr *MatchCalleeRef = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            MatchFD, false, Loc, MatchFD->getType(), VK_LValue
+        );
+        ImplicitCastExpr *MatchCalleeCast = ImplicitCastExpr::Create(
+            *Context, Context->getPointerType(MatchFD->getType()),
+            CK_FunctionToPointerDecay, MatchCalleeRef, nullptr, VK_PRValue, FPOptionsOverride()
+        );
+
+        DeclRefExpr *DFAObjRef = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            DFAObjVD, false, Loc, DFAObjVD->getType(), VK_LValue
+        );
+        UnaryOperator *DFAObjAddr = UnaryOperator::Create(
+            *Context, DFAObjRef, UO_AddrOf,
+            Context->getPointerType(DFAObjVD->getType()),
+            VK_PRValue, OK_Ordinary, Loc, false, FPOptionsOverride()
+        );
+
+        Expr *CallArgs[3] = { DFAObjAddr, CE->getArg(1), CE->getArg(2) };
+        return CallExpr::Create(
+            *Context, MatchCalleeCast, CallArgs, MatchFD->getReturnType(),
+            VK_PRValue, CE->getRParenLoc(), FPOptionsOverride()
+        );
+    }
 
     struct VConstexprState {
         static constexpr unsigned MAX_STEPS = 4096;
@@ -925,6 +1444,12 @@ private:
                         Child = CE->getArg(0);
                         continue;
                     }
+                    if (CalleeFD->getName() == "__veriobjc_regex_match" && CE->getNumArgs() >= 3) {
+                        if (Expr *LoweredDFA = buildLoweredVRegexMatch(CE)) {
+                            Child = LoweredDFA;
+                        }
+                        continue;
+                    }
                     if (hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr")) {
                         std::vector<int64_t> ArgVals;
                         bool AllConstArgs = true;
@@ -996,6 +1521,7 @@ public:
     explicit VeriObjCVisitor(ASTContext *Context) : Context(Context) {}
 
     std::vector<FunctionDecl *> &getSynthesizedDefs() { return SynthesizedDefs; }
+    std::vector<Decl *> &getSynthesizedVarDefs() { return SynthesizedVarDefs; }
 
     // RULE 1: Intercept and BAN the generic 'id' keyword across all declarations
     bool VisitVarDecl(VarDecl *D) {
@@ -1391,6 +1917,9 @@ public:
             return;
         }
         EmittingSynthesized = true;
+        for (Decl *VD : Visitor.getSynthesizedVarDefs()) {
+            CI.getASTConsumer().HandleTopLevelDecl(DeclGroupRef(VD));
+        }
         for (FunctionDecl *FD : Visitor.getSynthesizedDefs()) {
             CI.getASTConsumer().HandleTopLevelDecl(DeclGroupRef(FD));
         }

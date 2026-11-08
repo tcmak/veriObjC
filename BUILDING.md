@@ -59,14 +59,14 @@ Runs all unit tests for the data-stack bump allocator (`veriobjc_stack`), reusab
 ```
 
 ### 2. Clang 23 AST Plugin Test Suite (`plugin_tests`)
-Executes the positive test cases (verifying `0` calls to `objc_msgSend` / `objc_msg_lookup`) and the zero-bypass negative rejection suite (verifying compilation aborts on `id`, `NSObject`, dynamic reflection, untyped messages, unresolved selectors, and unsealed hierarchies):
+Executes the positive test cases (verifying `0` calls to `objc_msgSend`, `objc_msg_lookup`, `objc_enumerationMutation`, `_NSConcreteStackBlock`, or `_NSConcreteGlobalBlock`, and verifying `.rodata` DFA table emission and range-for pointer lowering) and the zero-bypass negative rejection suite (verifying compilation aborts on `id`, `NSObject`, dynamic reflection, untyped messages, unresolved selectors, unsealed hierarchies, double-free/use-after-move, escaping stack references, non-flat channel payloads, unbounded range loops, uncaught multi-frame error returns, escaping blocks, unconstrained generics, `vconstexpr` fuel exhaustion, and regex backreferences/lookarounds):
 
 ```bash
 ./tests/plugin/run_plugin_tests.sh build/libVeriObjCPlugin.so .
 ```
 
 ### 3. Examples Smoke & Acceptance Test Suite (`examples_smoke_tests`)
-Compiles all `.m` and `.c` files in `examples/` with `-O2 -Werror` and the Clang plugin, auditing emitted `.o` binaries via `nm` for zero dynamic dispatch calls and zero external `libc` dependencies:
+Compiles all `.m` (`audio_pipeline.m`, `sealed_synth_hierarchy.m`, `linear_channel_router.m`, `simd_range_filter.m`, `multiframe_packet_parser.m`, `non_escaping_block_pipeline.m`, `constrained_generic_vault.m`, `vconstexpr_tick_table.m`, `fix_protocol_dfa_router.m`) and `.c` (`kernel_dma_batch.c`, `order_book_snapshot.c`) files in `examples/` with `-O2 -Werror -fblocks` and the Clang plugin, auditing emitted `.o` binaries via `nm` for zero dynamic dispatch calls, zero block runtime dependencies, and zero external `libc` dependencies:
 
 ```bash
 ./tests/integration/run_examples_smoke_test.sh build/libVeriObjCPlugin.so .
