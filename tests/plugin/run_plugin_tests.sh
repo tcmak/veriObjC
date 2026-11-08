@@ -33,10 +33,21 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
              -I"$REPO_ROOT/rt/include" \
              -c "$pos_file" \
              -o "$TMP_OBJ"
-    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup"; then
-        echo "[FAIL] Positive Test $(basename "$pos_file") emitted forbidden dynamic dispatch symbol (objc_msgSend / objc_msg_lookup)!"
+    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation"; then
+        echo "[FAIL] Positive Test $(basename "$pos_file") emitted forbidden dynamic dispatch symbol (objc_msgSend / objc_msg_lookup / objc_enumerationMutation)!"
         nm "$TMP_OBJ"
         exit 1
+    fi
+    if [[ "$(basename "$pos_file")" == "test_valid_range_for.m" ]]; then
+        AST_OUT=$(clang-23 -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -I"$REPO_ROOT/rt/include" -Xclang -ast-dump -fsyntax-only "$pos_file")
+        if echo "$AST_OUT" | grep -q "ObjCForCollectionStmt"; then
+            echo "[FAIL] ObjCForCollectionStmt was not lowered in test_valid_range_for.m!"
+            exit 1
+        fi
+        if ! echo "$AST_OUT" | grep -q "__veriobjc_it"; then
+            echo "[FAIL] Expected lowered pointer iterator __veriobjc_it in AST of test_valid_range_for.m!"
+            exit 1
+        fi
     fi
     echo "[PASS] Positive Test $(basename "$pos_file") succeeded (0 dynamic dispatch calls)."
 done
@@ -69,6 +80,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Escaping data-stack reference"
     elif [[ "$base_name" == test_banned_nonflat_channel* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Non-flat channel payload type"
+    elif [[ "$base_name" == test_banned_unbounded_for_in* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Range-based for loop requires a container with a statically bounded array field"
     fi
 
     OUTPUT=$(clang-23 -Xclang -load -Xclang "$PLUGIN_PATH" \

@@ -8,6 +8,8 @@
 #include <clang/AST/ExprObjC.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/Stmt.h>
+#include <clang/AST/StmtObjC.h>
+#include <clang/Basic/DiagnosticSema.h>
 #include <clang/Basic/ParsedAttrInfo.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendPluginRegistry.h>
@@ -380,11 +382,163 @@ private:
         );
     }
 
-    void rewriteStmtTree(Stmt *S) {
+    Stmt *buildLoweredForCollection(ObjCForCollectionStmt *OFS, DeclContext *DC) {
+        if (!OFS || !DC) return nullptr;
+
+        Expr *Coll = OFS->getCollection() ? OFS->getCollection()->IgnoreParenImpCasts() : nullptr;
+        auto *ElemDS = dyn_cast_or_null<DeclStmt>(OFS->getElement());
+        VarDecl *ElemVD = (ElemDS && ElemDS->isSingleDecl()) ? dyn_cast<VarDecl>(ElemDS->getSingleDecl()) : nullptr;
+
+        ObjCIvarDecl *FoundIvar = nullptr;
+        const ConstantArrayType *CAT = nullptr;
+
+        if (Coll && ElemVD) {
+            if (const auto *OPT = Coll->getType()->getAs<ObjCObjectPointerType>()) {
+                if (ObjCInterfaceDecl *ID = OPT->getInterfaceDecl()) {
+                    for (const ObjCInterfaceDecl *CurID = ID; CurID && !FoundIvar; CurID = CurID->getSuperClass()) {
+                        for (ObjCIvarDecl *Ivar : CurID->ivars()) {
+                            if (const ConstantArrayType *CandCAT = Context->getAsConstantArrayType(Ivar->getType())) {
+                                if (CandCAT->getElementType().getCanonicalType() == ElemVD->getType().getCanonicalType()) {
+                                    FoundIvar = Ivar;
+                                    CAT = CandCAT;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!FoundIvar || !CAT || !ElemVD) {
+            DiagnosticsEngine &Diag = Context->getDiagnostics();
+            unsigned DiagID = Diag.getCustomDiagID(
+                DiagnosticsEngine::Error,
+                "VeriObjC Violation: Range-based for loop requires a container with a statically bounded array field."
+            );
+            Diag.Report(OFS->getForLoc(), DiagID);
+            return nullptr;
+        }
+
+        rewriteStmtTree(OFS->getBody(), DC);
+
+        SourceLocation Loc = OFS->getForLoc();
+        QualType ElemTy = CAT->getElementType();
+        QualType PtrTy = Context->getPointerType(ElemTy);
+
+        ObjCIvarRefExpr *IvarRef = new (*Context) ObjCIvarRefExpr(
+            FoundIvar, FoundIvar->getType(), Loc, Loc, Coll, true, false
+        );
+        ImplicitCastExpr *BeginPtr = ImplicitCastExpr::Create(
+            *Context, PtrTy, CK_ArrayToPointerDecay, IvarRef,
+            nullptr, VK_PRValue, FPOptionsOverride()
+        );
+
+        VarDecl *IterVD = VarDecl::Create(
+            *Context, DC, Loc, Loc, &Context->Idents.get("__veriobjc_it"),
+            PtrTy, nullptr, SC_None
+        );
+        IterVD->setInit(BeginPtr);
+
+        DeclRefExpr *IterRefForEnd = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            IterVD, false, Loc, PtrTy, VK_LValue
+        );
+        ImplicitCastExpr *IterRValForEnd = ImplicitCastExpr::Create(
+            *Context, PtrTy, CK_LValueToRValue, IterRefForEnd,
+            nullptr, VK_PRValue, FPOptionsOverride()
+        );
+
+        QualType SizeTy = Context->getSizeType();
+        llvm::APInt BoundVal(Context->getTypeSize(SizeTy), CAT->getSize().getZExtValue());
+        IntegerLiteral *BoundLit = IntegerLiteral::Create(*Context, BoundVal, SizeTy, Loc);
+
+        BinaryOperator *EndPtr = BinaryOperator::Create(
+            *Context, IterRValForEnd, BoundLit, BO_Add, PtrTy,
+            VK_PRValue, OK_Ordinary, Loc, FPOptionsOverride()
+        );
+
+        VarDecl *EndVD = VarDecl::Create(
+            *Context, DC, Loc, Loc, &Context->Idents.get("__veriobjc_end"),
+            PtrTy, nullptr, SC_None
+        );
+        EndVD->setInit(EndPtr);
+
+        Decl *InitDecls[2] = { IterVD, EndVD };
+        DeclStmt *InitStmt = new (*Context) DeclStmt(
+            DeclGroupRef::Create(*Context, InitDecls, 2), Loc, Loc
+        );
+
+        DeclRefExpr *IterRefCond = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            IterVD, false, Loc, PtrTy, VK_LValue
+        );
+        ImplicitCastExpr *IterRValCond = ImplicitCastExpr::Create(
+            *Context, PtrTy, CK_LValueToRValue, IterRefCond,
+            nullptr, VK_PRValue, FPOptionsOverride()
+        );
+        DeclRefExpr *EndRefCond = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            EndVD, false, Loc, PtrTy, VK_LValue
+        );
+        ImplicitCastExpr *EndRValCond = ImplicitCastExpr::Create(
+            *Context, PtrTy, CK_LValueToRValue, EndRefCond,
+            nullptr, VK_PRValue, FPOptionsOverride()
+        );
+        BinaryOperator *CondExpr = BinaryOperator::Create(
+            *Context, IterRValCond, EndRValCond, BO_LT, Context->IntTy,
+            VK_PRValue, OK_Ordinary, Loc, FPOptionsOverride()
+        );
+
+        DeclRefExpr *IterRefInc = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            IterVD, false, Loc, PtrTy, VK_LValue
+        );
+        UnaryOperator *IncExpr = UnaryOperator::Create(
+            *Context, IterRefInc, UO_PreInc, PtrTy,
+            VK_PRValue, OK_Ordinary, Loc, false, FPOptionsOverride()
+        );
+
+        DeclRefExpr *IterRefBody = DeclRefExpr::Create(
+            *Context, NestedNameSpecifierLoc(), SourceLocation(),
+            IterVD, false, Loc, PtrTy, VK_LValue
+        );
+        ImplicitCastExpr *IterRValBody = ImplicitCastExpr::Create(
+            *Context, PtrTy, CK_LValueToRValue, IterRefBody,
+            nullptr, VK_PRValue, FPOptionsOverride()
+        );
+        UnaryOperator *DerefExpr = UnaryOperator::Create(
+            *Context, IterRValBody, UO_Deref, ElemTy,
+            VK_LValue, OK_Ordinary, Loc, false, FPOptionsOverride()
+        );
+        ImplicitCastExpr *ElemInitRVal = ImplicitCastExpr::Create(
+            *Context, ElemTy, CK_LValueToRValue, DerefExpr,
+            nullptr, VK_PRValue, FPOptionsOverride()
+        );
+        ElemVD->setInit(ElemInitRVal);
+
+        Stmt *BodyStmts[2] = { OFS->getElement(), OFS->getBody() };
+        CompoundStmt *NewBody = CompoundStmt::Create(
+            *Context, BodyStmts, FPOptionsOverride(), Loc, OFS->getEndLoc()
+        );
+
+        return new (*Context) ForStmt(
+            *Context, InitStmt, CondExpr, nullptr, IncExpr, NewBody,
+            OFS->getForLoc(), OFS->getForLoc(), OFS->getRParenLoc()
+        );
+    }
+
+    void rewriteStmtTree(Stmt *S, DeclContext *DC) {
         if (!S) return;
         for (Stmt *&Child : S->children()) {
             if (!Child) continue;
-            rewriteStmtTree(Child);
+            if (auto *OFS = dyn_cast<ObjCForCollectionStmt>(Child)) {
+                if (Stmt *LoweredFor = buildLoweredForCollection(OFS, DC)) {
+                    Child = LoweredFor;
+                }
+                continue;
+            }
+            rewriteStmtTree(Child, DC);
             if (auto *OME = dyn_cast<ObjCMessageExpr>(Child)) {
                 if (Expr *DirectCall = buildDevirtualizedCall(OME)) {
                     Child = DirectCall;
@@ -590,7 +744,7 @@ public:
                 llvm::DenseMap<const VarDecl *, unsigned> StackRootDepth;
                 analyzeScopeRootSafety(FD->getBody(), 0, VarDeclDepth, StackRootDepth);
                 if (Context->getDiagnostics().hasErrorOccurred()) return;
-                rewriteStmtTree(FD->getBody());
+                rewriteStmtTree(FD->getBody(), FD);
             }
             return;
         }
@@ -610,7 +764,7 @@ public:
                 llvm::DenseMap<const VarDecl *, unsigned> StackRootDepth;
                 analyzeScopeRootSafety(OrigBody, 0, VarDeclDepth, StackRootDepth);
                 if (Context->getDiagnostics().hasErrorOccurred()) continue;
-                rewriteStmtTree(OrigBody);
+                rewriteStmtTree(OrigBody, MD);
 
                 FunctionDecl *DirectFD = getOrCreateDirectMethodDecl(ID, MD);
                 llvm::DenseMap<const ValueDecl *, ValueDecl *> DeclMap;
@@ -683,7 +837,11 @@ private:
 
 public:
     explicit VeriObjCConsumer(CompilerInstance &CI)
-        : CI(CI), Visitor(&CI.getASTContext()) {}
+        : CI(CI), Visitor(&CI.getASTContext()) {
+        CI.getDiagnostics().setSeverity(
+            diag::warn_collection_expr_type, diag::Severity::Ignored, SourceLocation()
+        );
+    }
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
         if (EmittingSynthesized) {

@@ -140,8 +140,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Registered `__attribute__((objc_flat))` Sema attribute and statically verifies payload types of `veriobjc_channel_send` and `objc_flat` structs/typedefs contain zero pointer/reference fields at any nesting depth (`test_banned_nonflat_channel.m`, `test_valid_linear_and_channel.m`, `examples/linear_channel_router.m`).
 
 ### 2.5 Syntactic Lowering Passes
-- [ ] **Task 2.5.1: Range-Based For Loop Lowering**
-  - Lower `for (auto &x : container)` into raw pointer increments (`ForStmt`).
+- [x] **Task 2.5.1: Range-Based For Loop Lowering [TDD Cycle 13]**
+  - Intercepts `ObjCForCollectionStmt` (`for (Elem *x in container)`) in `VeriObjCPlugin.cpp` and lowers directly into a raw C pointer `ForStmt` (`__veriobjc_it`, `__veriobjc_end`, `BinaryOperator <`, `UnaryOperator ++`), eliminating `objc_enumerationMutation` and `objc_msg_lookup` (`test_valid_range_for.m`, `examples/simd_range_filter.m`).
+  - Statically rejects `for (... in ...)` over containers without a compile-time bounded array field (`test_banned_unbounded_for_in.m`).
 - [ ] **Task 2.5.2: Multi-Frame Error Return Lowering (`return err from f`)**
   - Statically check innermost active frame of `f` and lower error flag without stack unwinder.
 - [ ] **Task 2.5.3: Non-Escaping Function Blocks**
