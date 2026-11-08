@@ -343,6 +343,18 @@ static inline void __veriobjc_mark_moved(const void *ptr) {
 #define veriobjc_move(x) (__veriobjc_mark_moved(&(x)), (x))
 
 // ---------------------------------------------------------------------------
+// Multi-Frame Error Return Intrinsic (return err from f)
+// ---------------------------------------------------------------------------
+
+static inline int32_t __veriobjc_return_err_from(int32_t err_code, const char *target_frame) {
+    (void)target_frame;
+    return err_code;
+}
+
+#define veriobjc_return_err_from(err_code, target_frame) \
+    return __veriobjc_return_err_from((err_code), #target_frame)
+
+// ---------------------------------------------------------------------------
 // Lock-Free Single-Producer Single-Consumer Flat-Value Channel Stub
 // ---------------------------------------------------------------------------
 

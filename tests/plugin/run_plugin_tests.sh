@@ -82,6 +82,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Non-flat channel payload type"
     elif [[ "$base_name" == test_banned_unbounded_for_in* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Range-based for loop requires a container with a statically bounded array field"
+    elif [[ "$base_name" == test_banned_uncaught_err_from* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Uncaught multi-frame error return"
     fi
 
     OUTPUT=$(clang-23 -Xclang -load -Xclang "$PLUGIN_PATH" \

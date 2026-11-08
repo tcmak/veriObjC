@@ -119,6 +119,7 @@ TEST(VeriObjC_ScopeAndLayout, MoveIntrinsicAndFlatChannelOperations) {
     HeaderlessParticle p1 = { 1.0f, 2.0f, 42u };
     HeaderlessParticle p2 = veriobjc_move(p1);
     LONGS_EQUAL(42u, p2.id);
+    LONGS_EQUAL(-7, __veriobjc_return_err_from(-7, "test_frame"));
 
     // Null guard on channel init
     veriobjc_channel_init(nullptr, nullptr, sizeof(HeaderlessParticle), 2);

@@ -143,8 +143,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 2.5.1: Range-Based For Loop Lowering [TDD Cycle 13]**
   - Intercepts `ObjCForCollectionStmt` (`for (Elem *x in container)`) in `VeriObjCPlugin.cpp` and lowers directly into a raw C pointer `ForStmt` (`__veriobjc_it`, `__veriobjc_end`, `BinaryOperator <`, `UnaryOperator ++`), eliminating `objc_enumerationMutation` and `objc_msg_lookup` (`test_valid_range_for.m`, `examples/simd_range_filter.m`).
   - Statically rejects `for (... in ...)` over containers without a compile-time bounded array field (`test_banned_unbounded_for_in.m`).
-- [ ] **Task 2.5.2: Multi-Frame Error Return Lowering (`return err from f`)**
-  - Statically check innermost active frame of `f` and lower error flag without stack unwinder.
+- [x] **Task 2.5.2: Multi-Frame Error Return Lowering (`return err from f`) [TDD Cycle 14]**
+  - Static call-graph active-frame verifier (`collectErrorReturnGraph` & `verifyMultiFrameErrorReturns`) ensuring every `veriobjc_return_err_from(err, target_frame)` call site provably terminates inside an active `target_frame` without an exception unwinder (`test_valid_err_from.m`, `examples/multiframe_packet_parser.m`).
+  - Rejects uncaught `from` error returns escaping to top-level callers (`test_banned_uncaught_err_from.m`).
 - [ ] **Task 2.5.3: Non-Escaping Function Blocks**
   - Monomorphize function blocks; compile-time rejection of heap-escaping blocks.
 - [ ] **Task 2.5.4: Constrained Generics (`vgeneric`) Definition-Site Checking**

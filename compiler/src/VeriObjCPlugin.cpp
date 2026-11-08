@@ -29,9 +29,16 @@ namespace {
 
 class VeriObjCVisitor : public RecursiveASTVisitor<VeriObjCVisitor> {
 private:
+    struct ErrFromReq {
+        std::string TargetFrame;
+        SourceLocation Loc;
+    };
+
     ASTContext *Context;
     llvm::StringMap<FunctionDecl *> DirectMethodDecls;
     std::vector<FunctionDecl *> SynthesizedDefs;
+    llvm::DenseMap<const FunctionDecl *, std::vector<ErrFromReq>> DirectRaisesFrom;
+    llvm::DenseMap<const FunctionDecl *, llvm::SmallVector<std::pair<const FunctionDecl *, SourceLocation>, 4>> CallEdges;
 
     static const VarDecl *extractVarDecl(const Expr *E) {
         if (!E) return nullptr;
@@ -528,6 +535,24 @@ private:
         );
     }
 
+    void collectErrorReturnGraph(const Stmt *S, const FunctionDecl *CallerFD) {
+        if (!S || !CallerFD) return;
+        if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
+                if (CalleeFD->getName() == "__veriobjc_return_err_from" && CE->getNumArgs() >= 2) {
+                    if (const auto *SL = dyn_cast<StringLiteral>(CE->getArg(1)->IgnoreParenImpCasts())) {
+                        DirectRaisesFrom[CallerFD].push_back({SL->getString().str(), CE->getExprLoc()});
+                    }
+                } else {
+                    CallEdges[CalleeFD->getCanonicalDecl()].push_back({CallerFD->getCanonicalDecl(), CE->getExprLoc()});
+                }
+            }
+        }
+        for (const Stmt *Child : S->children()) {
+            collectErrorReturnGraph(Child, CallerFD);
+        }
+    }
+
     void rewriteStmtTree(Stmt *S, DeclContext *DC) {
         if (!S) return;
         for (Stmt *&Child : S->children()) {
@@ -539,6 +564,14 @@ private:
                 continue;
             }
             rewriteStmtTree(Child, DC);
+            if (auto *CE = dyn_cast<CallExpr>(Child)) {
+                if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
+                    if (CalleeFD->getName() == "__veriobjc_return_err_from" && CE->getNumArgs() >= 2) {
+                        Child = CE->getArg(0);
+                        continue;
+                    }
+                }
+            }
             if (auto *OME = dyn_cast<ObjCMessageExpr>(Child)) {
                 if (Expr *DirectCall = buildDevirtualizedCall(OME)) {
                     Child = DirectCall;
@@ -737,6 +770,7 @@ public:
 
         if (auto *FD = dyn_cast<FunctionDecl>(D)) {
             if (FD->hasBody()) {
+                collectErrorReturnGraph(FD->getBody(), FD->getCanonicalDecl());
                 llvm::DenseSet<const VarDecl *> MovedVars;
                 llvm::DenseSet<const VarDecl *> FreedVars;
                 analyzeLinearOwnership(FD->getBody(), MovedVars, FreedVars);
@@ -827,6 +861,41 @@ public:
             }
         }
     }
+
+    void verifyMultiFrameErrorReturns() {
+        DiagnosticsEngine &Diag = Context->getDiagnostics();
+        unsigned DiagID = Diag.getCustomDiagID(
+            DiagnosticsEngine::Error,
+            "VeriObjC Violation: Uncaught multi-frame error return 'from %0' in function '%1' outside active '%0' frame."
+        );
+
+        for (const auto &Entry : DirectRaisesFrom) {
+            const FunctionDecl *OriginFD = Entry.first;
+            for (const ErrFromReq &Req : Entry.second) {
+                llvm::SmallVector<std::pair<const FunctionDecl *, SourceLocation>, 8> Worklist;
+                llvm::DenseSet<const FunctionDecl *> Visited;
+                Worklist.push_back({OriginFD, Req.Loc});
+
+                while (!Worklist.empty()) {
+                    auto [CurFD, ReportLoc] = Worklist.pop_back_val();
+                    if (!Visited.insert(CurFD).second) {
+                        continue;
+                    }
+                    if (CurFD->getName() == Req.TargetFrame) {
+                        continue;
+                    }
+                    auto EdgeIt = CallEdges.find(CurFD);
+                    if (EdgeIt == CallEdges.end() || EdgeIt->second.empty()) {
+                        Diag.Report(ReportLoc, DiagID) << Req.TargetFrame << CurFD->getName();
+                    } else {
+                        for (const auto &[CallerFD, CallLoc] : EdgeIt->second) {
+                            Worklist.push_back({CallerFD, CallLoc});
+                        }
+                    }
+                }
+            }
+        }
+    }
 };
 
 class VeriObjCConsumer : public ASTConsumer {
@@ -855,6 +924,7 @@ public:
     }
 
     void HandleTranslationUnit(ASTContext &Context) override {
+        Visitor.verifyMultiFrameErrorReturns();
         if (Context.getDiagnostics().hasErrorOccurred()) {
             return;
         }
