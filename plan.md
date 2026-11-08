@@ -30,7 +30,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ---
 
 ## ⚡ Phase 1: Freestanding Closed-World Micro-Runtime (`rt/`)
-*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 2 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
+*(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 2 & `docs/veriobjc-proof-of-concept.md` Phase 1)*
 
 ### 1.1 Data-Stack Substrate (`veriobjc_stack`)
 - [x] **Task 1.1.1: Stack Initialization & Capacity Invariants [TDD Cycle 1]**
@@ -51,7 +51,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Lay down `isa` and object instance memory contiguously on the data stack.
 
 ### 1.2 Reusable Freelist Pools (`veriobjc_pool`)
-*(Mapped to: `docs/veriobjc-foundational-library.md` §3 & `docs/veriobjc-proof-of-concept-updated.md` Phase 1)*
+*(Mapped to: `docs/veriobjc-foundational-library.md` §3 & `docs/veriobjc-proof-of-concept.md` Phase 1)*
 - [x] **Task 1.2.1: Pool Initialization over Data Stack [TDD Cycle 2]**
   - Backing memory tied to a `veriobjc_stack`.
   - Slot size fixed statically; initial high-water mark count = 0; free_head = `UINT32_MAX`.

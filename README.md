@@ -128,6 +128,9 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | [`docs/veriobjc-foundational-library.md`](docs/veriobjc-foundational-library.md) | `vstd` design: strings, stacks, variants, channels, atomics, FFI matrix |
 | [`docs/veriobjc-advanced-substrate.md`](docs/veriobjc-advanced-substrate.md) | vmeta metaprogramming, vregex, `veriStream` fixed-point streaming substrate |
 | [`docs/veriobjc-type-system-and-metaprogramming-vmeta.md`](docs/veriobjc-type-system-and-metaprogramming-vmeta.md) | Nominal local type inference (`auto`), constrained `vgeneric`, `vconstexpr`, `vregex` |
+| [`docs/veriobjc-master-library-mapping-matrix.md`](docs/veriobjc-master-library-mapping-matrix.md) | Master library mapping matrix across standard, low-level, and hardware tiers |
+| [`docs/veriobjc-examples.md`](docs/veriobjc-examples.md) | Architectural design walkthroughs and domain examples |
+| [`docs/veriobjc-proof-of-concept.md`](docs/veriobjc-proof-of-concept.md) | Proof-of-concept design and baseline verification targets |
 | [`docs/veriobjc-language-comparison.md`](docs/veriobjc-language-comparison.md) | Honest dimension-by-dimension comparison vs ObjC/C++/Rust/Zig/Go |
 | [`plan.md`](plan.md) | Master TDD execution checklist (this repo's living build log) |
 
