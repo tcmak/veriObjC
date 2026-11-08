@@ -163,7 +163,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Reject `auto` in function parameters (`test_banned_auto_param.m`) and in protocol/`@export` method return types (`test_banned_auto_export.m`); private/helper returns permitted.
 
 ### 2.6 Hardware Stream Elaboration (`veriStream`)
-*(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — Neural Inference Substrate)*
+*(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — )*
 
 - [ ] **Task 2.6.1: Wire-Level Stream Types (`Bits<W>` / `Stream<T, N>`)**
   - `W` and `N` as compile-time value parameters (`vconstexpr` — depends on Task 2.5.5).
@@ -178,7 +178,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel; **fail the build if the post-synthesis vendor report shows any DSP block instantiated**.
 
 ### 2.7 Ban List Compliance Suite
-*(Mapped to: `docs/veriobjc-ban-list.md` — Ban Registry & Rejection Corpus)*
+*(Mapped to: `docs/veriobjc-advanced-substrate-updated.md` §6 — Fixed-Point Streaming Substrate (`veriStream`); model-agnostic — the ternary LLM blocks are one tenant, not the identity)*
 
 - [ ] **Task 2.7.1: Centralized Ban Registry & Diagnostic Compliance Tests**
   - Single-source ban registry (`docs/veriobjc-ban-list.md`): every banned construct mapped to its exact diagnostic string and test file (existing ✓ tests from Tasks 2.2/2.4/2.5 imported as rows; ⬜ rows added as their features land).
@@ -211,7 +211,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - `vresult<T, E>` variant unions with required branch checking before access.
 - [ ] **Task 3.8: Concurrency & Linear Guards (`<vstd/channel.h>`, `<vstd/atomic.h>`)**
   - Lock-free SPSC flat-value channels and linear `vatomic<T>`.
-- [ ] **Task 3.9: Neural Inference Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
+- [ ] **Task 3.9: Streaming & Ternary Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
   - Packed ternary weights {-1, 0, 1} as `Bits(2)` codes, 4 per byte, `consteval` tables pinned in BRAM; weight image verified via `from_bytes` on load.
   - `ll.ml/model/` blocks: token shift (register-delayed stream), GLU mux gates, RMSNorm with power-of-two scales (shifts only), KV cache as pre-banked BRAM arena with declared `ContextCap` — overflow is a compile error (`test_banned_context_overflow.m`).
 
