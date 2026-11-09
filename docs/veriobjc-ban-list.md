@@ -39,10 +39,12 @@ Two artifacts, both CI gates:
 | General heap on constrained paths | Yes (`malloc`) | "`@alloc` not permitted in `@nolatency` context" | Data stacks / `vpool` | `test_banned_heap_nolatency.m` ✓ |
 | Double free / use-after-move | — | Linear ownership violation | `move`/`consumed` tracking | `test_banned_double_free.m` ✓ |
 | Unannotated `extern fn` called from `@nolatency` | Yes | "defaults to `@cold`" | Declared effects on `extern fn` | `test_cold_ffi_call.m` ✓ |
-| Data-stack reference / pool slot across FFI | Yes | "Banned cross-boundary ownership" | Opaque `vpool` handles | `test_ffi_stack_ref_export.m` ✓ |
+| Data-stack reference / pool slot across FFI | Yes | "Banned cross-boundary ownership" | Opaque `vpool` handles | `test_ffi_stack_ref_export.m` / `test_banned_ffi_nonflat_export.m` ✓ |
 | Allocator mixing (foreign `free`, VeriObjC recycling of foreign memory) | Yes | "Banned allocator mixing" | Each allocator's products stay on its side | `test_banned_alloc_mixing.m` ✓ |
-| Blocking POSIX I/O (`read`/`write`) on constrained paths | Yes | "Banned blocking I/O in `@nolatency` context" | Non-blocking DMA lines; ring buffers (TDD plan Task 3.11) | `test_banned_blocking_io.m` ⬜ |
-| `@shared` refcounting outside the `@cold` quarantine | Yes (ARC) | "`@shared` retain permitted only in `@cold`" | Data stacks / `vpool`; `vweak` (TDD plan Task 2.8.1) | `test_banned_shared_nolatency.m` ⬜ |
+| Blocking POSIX I/O (`read`/`write`) on constrained paths | Yes | "Banned blocking I/O in `@nolatency` context" | Non-blocking DMA lines; ring buffers | `test_banned_blocking_io.m` ✓ |
+| `@shared` refcounting outside the `@cold` quarantine | Yes (ARC) | "`@shared` retain permitted only in `@cold`" | Data stacks / `vpool`; `vweak` | `test_banned_shared_nolatency.m` ✓ |
+| Intermediate copy of built-in-place type | Yes | "Intermediate copy of built-in-place type" | `veriobjc_push_inplace` destination threading | `test_banned_temp_copy_inplace.m` ✓ |
+| Cyclic static task DAG | — | "Cycle detected in static task DAG" | Acyclic compile-time DAG with proven WCET | `test_banned_dag_cycle.m` ✓ |
 
 ### C. Metaprogramming (vmeta)
 
@@ -55,6 +57,8 @@ Two artifacts, both CI gates:
 | `auto` in parameters / public signatures | "Banned inference in signature position" | Concrete types or constrained `vgeneric` | `test_banned_auto_param.m` / `test_banned_auto_export.m` ✓ |
 | `vregex` backreferences / lookaround | "No DFA can exist for this pattern" (with rewrite suggestion) | Regular-language dialect | `test_backref_regex.m` ✓ |
 | Regex state explosion | "Byte budget exceeded (pattern named)" | Manifest table budget | `test_regex_state_explosion.m` ✓ |
+| Non-exhaustive `vmatch` on `vvariant` | "Non-exhaustive vmatch on vvariant" | Exhaustive `vmatch` covering all enum tags | `test_banned_nonexhaustive_match.m` ✓ |
+| Monomorphization budget exceeded | "Monomorphization budget exceeded" | Deduplicated `@mono` within package budget or `@erased` | `test_banned_mono_budget.m` ✓ |
 
 ### D. veriStream
 

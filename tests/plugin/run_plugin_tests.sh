@@ -65,6 +65,46 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
     fi
+    if [[ "$(basename "$pos_file")" == "test_valid_effect_system.m" ]]; then
+        EFF_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --effects-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$EFF_OUT" | grep -q "Function: compute_checksum | Survivors: 0 (effect-free)"; then
+            echo "[FAIL] Expected --effects-report to report 0 survivors for @pure compute_checksum!"
+            echo "$EFF_OUT"
+            exit 1
+        fi
+        if ! echo "$EFF_OUT" | grep -q "Function: cold_audit_entry | .*@io (cold_diag_log)"; then
+            echo "[FAIL] Expected --effects-report to list surviving @io (cold_diag_log) in cold_audit_entry!"
+            echo "$EFF_OUT"
+            exit 1
+        fi
+    fi
+    if [[ "$(basename "$pos_file")" == "test_valid_ffi_export.m" ]]; then
+        HDR_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --export-header-stdout -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$HDR_OUT" | grep -q "@pre(hdr.msg_len <= 1400)"; then
+            echo "[FAIL] Expected --export-header-stdout to emit @pre contract comment!"
+            echo "$HDR_OUT"
+            exit 1
+        fi
+        if ! echo "$HDR_OUT" | grep -q "export_ingest_wire_order"; then
+            echo "[FAIL] Expected --export-header-stdout to emit C prototype for export_ingest_wire_order!"
+            echo "$HDR_OUT"
+            exit 1
+        fi
+    fi
+    if [[ "$(basename "$pos_file")" == "test_valid_mono_dedup.m" ]]; then
+        MONO_COUNT=$(nm "$TMP_OBJ" | grep -c "__veriobjc_mono_block_" || true)
+        if [[ "$MONO_COUNT" -ne 1 ]]; then
+            echo "[FAIL] Expected identical blocks in test_valid_mono_dedup.m to deduplicate to 1 symbol, got $MONO_COUNT!"
+            nm "$TMP_OBJ"
+            exit 1
+        fi
+        MONO_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --mono-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$MONO_OUT" | grep -q "ClampGeneric<int32_t> | Instantiations: 1 (Deduplicated: 1)"; then
+            echo "[FAIL] Expected --mono-report to show deduplicated ClampGeneric<int32_t>!"
+            echo "$MONO_OUT"
+            exit 1
+        fi
+    fi
     echo "[PASS] Positive Test $(basename "$pos_file") succeeded (0 dynamic dispatch calls)."
 done
 
@@ -146,6 +186,20 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Banned computation macro"
     elif [[ "$base_name" == test_regex_state_explosion* ]]; then
         EXPECTED_MSG="Byte budget exceeded"
+    elif [[ "$base_name" == test_banned_blocking_io* ]]; then
+        EXPECTED_MSG="Banned blocking I/O in @nolatency context"
+    elif [[ "$base_name" == test_banned_shared_nolatency* ]]; then
+        EXPECTED_MSG="@shared retain permitted only in @cold"
+    elif [[ "$base_name" == test_banned_ffi_nonflat_export* ]]; then
+        EXPECTED_MSG="Banned cross-boundary ownership"
+    elif [[ "$base_name" == test_banned_nonexhaustive_match* ]]; then
+        EXPECTED_MSG="Non-exhaustive vmatch on vvariant"
+    elif [[ "$base_name" == test_banned_mono_budget* ]]; then
+        EXPECTED_MSG="Monomorphization budget exceeded"
+    elif [[ "$base_name" == test_banned_dag_cycle* ]]; then
+        EXPECTED_MSG="Cycle detected in static task DAG"
+    elif [[ "$base_name" == test_banned_temp_copy_inplace* ]]; then
+        EXPECTED_MSG="Intermediate copy of built-in-place type"
     fi
 
     OUTPUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions \

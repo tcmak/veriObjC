@@ -72,6 +72,12 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_alloc_mixing.m)
             EXPECTED_DIAG="Banned allocator mixing"
             ;;
+        valid_objc_blocking_io.m)
+            EXPECTED_DIAG="Banned blocking I/O in @nolatency context"
+            ;;
+        valid_objc_shared_nolatency.m)
+            EXPECTED_DIAG="@shared retain permitted only in @cold"
+            ;;
         *)
             echo "[FAIL] Unmapped corpus file $base_name in Ban Registry!"
             exit 1

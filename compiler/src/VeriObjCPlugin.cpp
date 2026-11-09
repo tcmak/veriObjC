@@ -17,9 +17,11 @@
 #include <clang/Sema/Sema.h>
 #include <llvm/ADT/DenseMap.h>
 #include <llvm/ADT/DenseSet.h>
+#include <llvm/ADT/FoldingSet.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringMap.h>
 #include <llvm/ADT/StringRef.h>
+#include <algorithm>
 #include <array>
 #include <bitset>
 #include <map>
@@ -30,6 +32,13 @@
 using namespace clang;
 
 namespace {
+
+struct VeriObjCPluginOptions {
+    bool EmitHwReport = false;
+    bool EmitEffectsReport = false;
+    bool EmitMonoReport = false;
+    bool EmitExportHeader = false;
+};
 
 struct CompiledDFA {
     uint32_t NumStates = 0;
@@ -193,19 +202,37 @@ private:
         const FunctionDecl *ActiveFD = nullptr;
     };
 
+    struct MonoGenericEntry {
+        std::string Package;
+        std::string GenericName;
+        unsigned UniqueCount = 0;
+        unsigned DedupedCount = 0;
+        uint32_t CodeBytes = 0;
+    };
+
+    struct DAGEdgeRecord {
+        std::string From;
+        std::string To;
+        uint32_t WCET = 0;
+        SourceLocation Loc;
+    };
+
     ASTContext *Context;
+    VeriObjCPluginOptions Opts;
     llvm::StringMap<FunctionDecl *> DirectMethodDecls;
     std::vector<FunctionDecl *> SynthesizedDefs;
     llvm::DenseMap<const FunctionDecl *, std::vector<ErrFromReq>> DirectRaisesFrom;
     llvm::DenseMap<const FunctionDecl *, llvm::SmallVector<std::pair<const FunctionDecl *, SourceLocation>, 4>> CallEdges;
     llvm::DenseMap<const VarDecl *, FunctionDecl *> MonomorphizedBlocks;
     llvm::DenseMap<const VarDecl *, llvm::SmallVector<VarDecl *, 4>> BlockCapturedVars;
+    llvm::StringMap<FunctionDecl *> DedupBlockDecls;
+    llvm::StringMap<MonoGenericEntry> MonoGenericStats;
+    std::vector<DAGEdgeRecord> DAGEdges;
     unsigned MonoBlockCounter = 0;
     std::map<std::pair<const FunctionDecl *, std::vector<int64_t>>, int64_t> VConstexprMemo;
     llvm::StringMap<VarDecl *> CompiledDFADecls;
     std::vector<Decl *> SynthesizedVarDefs;
     unsigned DFACounter = 0;
-    bool EmitHwReport = false;
     unsigned LastReduceStages = 0;
 
     // -----------------------------------------------------------------------
@@ -1180,6 +1207,16 @@ private:
         }
 
         QualType FnTy = Context->getFunctionType(FPT->getReturnType(), ParamTypes, FunctionProtoType::ExtProtoInfo());
+        std::string DedupKey;
+        if (OutCaptures.empty() && BD->getBody()) {
+            llvm::raw_string_ostream OS(DedupKey);
+            OS << FnTy.getCanonicalType().getAsString() << "::";
+            BD->getBody()->printPretty(OS, nullptr, Context->getPrintingPolicy());
+            if (auto It = DedupBlockDecls.find(DedupKey); It != DedupBlockDecls.end()) {
+                return It->second;
+            }
+        }
+
         std::string Name = "__veriobjc_mono_block_" + std::to_string(MonoBlockCounter++);
         DeclContext *TU = Context->getTranslationUnitDecl();
         FunctionDecl *BlockFD = FunctionDecl::Create(
@@ -1214,6 +1251,7 @@ private:
             BlockFD->setBody(Body);
             SynthesizedDefs.push_back(BlockFD);
         }
+        if (!DedupKey.empty()) DedupBlockDecls[DedupKey] = BlockFD;
         return BlockFD;
     }
 
@@ -1271,13 +1309,84 @@ private:
         return IntegerLiteral::Create(*Context, APVal, CE->getType(), CE->getExprLoc());
     }
 
+    Expr *tryFoldReflectFieldCount(CallExpr *CE) {
+        if (!CE || CE->getNumArgs() < 1) return nullptr;
+        QualType ArgTy = CE->getArg(0)->getType();
+        if (!ArgTy->isPointerType()) return nullptr;
+        const auto *RT = ArgTy->getPointeeType()->getAs<RecordType>();
+        const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+        if (!RD) return nullptr;
+
+        uint32_t Count = 0;
+        for (const FieldDecl *FD : RD->fields()) {
+            (void)FD;
+            Count++;
+        }
+        return IntegerLiteral::Create(*Context, llvm::APInt(32, Count), Context->UnsignedIntTy, CE->getExprLoc());
+    }
+
+    bool verifyTaskDAGAndComputeWCET(SourceLocation DefaultLoc, uint32_t &OutWCET) {
+        OutWCET = 0;
+        if (DAGEdges.empty()) return true;
+
+        llvm::StringMap<llvm::SmallVector<std::pair<std::string, uint32_t>, 4>> Adj;
+        std::set<std::string> Nodes;
+        for (const auto &E : DAGEdges) {
+            Adj[E.From].push_back({E.To, E.WCET});
+            Nodes.insert(E.From);
+            Nodes.insert(E.To);
+        }
+
+        llvm::StringMap<int> Color; // 0 = unvisited, 1 = visiting, 2 = done
+        llvm::StringMap<uint32_t> LongestFrom;
+        std::string CycleNode;
+
+        auto dfs = [&](auto &self, const std::string &U) -> bool {
+            Color[U] = 1;
+            uint32_t Best = 0;
+            for (const auto &[V, W] : Adj[U]) {
+                if (Color[V] == 1) {
+                    CycleNode = V;
+                    return false;
+                }
+                if (Color[V] == 0 && !self(self, V)) return false;
+                Best = std::max(Best, W + LongestFrom[V]);
+            }
+            Color[U] = 2;
+            LongestFrom[U] = Best;
+            return true;
+        };
+
+        for (const std::string &N : Nodes) {
+            if (Color[N] == 0 && !dfs(dfs, N)) {
+                SourceLocation Loc = DAGEdges.back().Loc.isValid() ? DAGEdges.back().Loc : DefaultLoc;
+                reportError(Loc, "VeriObjC Violation: Cycle detected in static task DAG involving node '%0' — deadlock-freedom proof failed.")
+                    << CycleNode;
+                return false;
+            }
+            OutWCET = std::max(OutWCET, LongestFrom[N]);
+        }
+        return true;
+    }
+
     Expr *tryRewriteCallExpr(CallExpr *CE) {
         if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
-            if (CalleeFD->getName() == "__veriobjc_return_err_from" && CE->getNumArgs() >= 2) {
+            llvm::StringRef Name = CalleeFD->getName();
+            if (Name == "__veriobjc_return_err_from" && CE->getNumArgs() >= 2) {
                 return CE->getArg(0);
             }
-            if (CalleeFD->getName() == "__veriobjc_regex_match" && CE->getNumArgs() >= 3) {
+            if (Name == "__veriobjc_regex_match" && CE->getNumArgs() >= 3) {
                 return buildLoweredVRegexMatch(CE);
+            }
+            if (Name == "__veriobjc_reflect_field_count") {
+                return tryFoldReflectFieldCount(CE);
+            }
+            if (Name == "__veriobjc_dag_critical_path_wcet") {
+                uint32_t WCET = 0;
+                if (verifyTaskDAGAndComputeWCET(CE->getExprLoc(), WCET)) {
+                    return IntegerLiteral::Create(*Context, llvm::APInt(32, WCET), Context->UnsignedIntTy, CE->getExprLoc());
+                }
+                return nullptr;
             }
             if (hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr")) {
                 return tryFoldVConstexprCall(CE, CalleeFD);
@@ -1393,7 +1502,7 @@ private:
 
     void auditHwKernelAndReport(const Stmt *Body, llvm::StringRef KernelName) {
         verifyHwKernelNoMultiply(Body, KernelName);
-        if (!Context->getDiagnostics().hasErrorOccurred() && EmitHwReport) {
+        if (!Context->getDiagnostics().hasErrorOccurred() && Opts.EmitHwReport) {
             unsigned Stages = LastReduceStages > 0 ? LastReduceStages : 9;
             llvm::errs() << "[VeriObjC --hw-report] Kernel: " << KernelName
                          << " | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: "
@@ -1401,22 +1510,178 @@ private:
         }
     }
 
-    void verifyNoLatencyCalls(const Stmt *S) {
+    static llvm::StringRef classifyCallEffect(const FunctionDecl *CalleeFD) {
+        if (!CalleeFD) return "";
+        llvm::StringRef Name = CalleeFD->getName();
+        if (hasVeriObjCAnnotation(CalleeFD, "objc_effect_alloc") ||
+            Name == "malloc" || Name == "calloc" || Name == "realloc") {
+            return "@alloc";
+        }
+        if (hasVeriObjCAnnotation(CalleeFD, "objc_effect_blocking") ||
+            Name == "read" || Name == "write" || Name == "recv" ||
+            Name == "send" || Name == "accept" || Name == "sleep" || Name == "usleep") {
+            return "@blocking";
+        }
+        if (hasVeriObjCAnnotation(CalleeFD, "objc_effect_shared_retain") ||
+            Name == "veriobjc_shared_retain" || Name == "objc_retain") {
+            return "@shared-retain";
+        }
+        if (hasVeriObjCAnnotation(CalleeFD, "objc_effect_io")) return "@io";
+        if (hasVeriObjCAnnotation(CalleeFD, "objc_effect_fence")) return "@fence";
+        return "";
+    }
+
+    void inspectCallSiteEffects(const CallExpr *CE, const FunctionDecl *CallerFD, std::vector<std::string> &Survivors) {
+        const FunctionDecl *CalleeFD = CE->getDirectCallee();
+        if (!CalleeFD) return;
+
+        llvm::StringRef Name = CalleeFD->getName();
+        llvm::StringRef Eff = classifyCallEffect(CalleeFD);
+        if (!Eff.empty()) {
+            unsigned Line = Context->getSourceManager().getSpellingLineNumber(CE->getExprLoc());
+            Survivors.push_back("Line " + std::to_string(Line) + ": " + Eff.str() + " (" + Name.str() + ")");
+        }
+
+        bool IsColdCaller = hasVeriObjCAnnotation(CallerFD, "objc_cold");
+        bool IsNolatency  = hasVeriObjCAnnotation(CallerFD, "objc_nolatency");
+        bool IsPure       = hasVeriObjCAnnotation(CallerFD, "objc_pure");
+
+        if (Eff == "@shared-retain" && !IsColdCaller) {
+            reportError(CE->getExprLoc(), "VeriObjC Violation: @shared retain permitted only in @cold quarantine context (called '%0' outside @cold).")
+                << Name;
+            return;
+        }
+        if (!IsNolatency && !IsPure) return;
+
+        if (Eff == "@blocking") {
+            reportError(CE->getExprLoc(), "VeriObjC Violation: Banned blocking I/O in @nolatency context: '%0' disrupts deterministic execution.")
+                << Name;
+        } else if (IsPure && !Eff.empty()) {
+            reportError(CE->getExprLoc(), "VeriObjC Violation: Effectful call '%0' (%1) is not permitted in a @pure context.")
+                << Name << Eff;
+        } else if (Eff.empty() && !CalleeFD->hasBody() && !isInRuntimeHeader(CalleeFD->getLocation()) &&
+                   !hasVeriObjCAnnotation(CalleeFD, "objc_nolatency") &&
+                   !hasVeriObjCAnnotation(CalleeFD, "objc_pure") &&
+                   !hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr")) {
+            reportError(CE->getExprLoc(), "VeriObjC Violation: Unannotated extern function '%0' defaults to @cold and cannot be called from a @nolatency context.")
+                << Name;
+        }
+    }
+
+    void walkFunctionEffects(const Stmt *S, const FunctionDecl *CallerFD, std::vector<std::string> &Survivors) {
         if (!S) return;
         if (const auto *CE = dyn_cast<CallExpr>(S)) {
-            if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
-                llvm::StringRef Name = CalleeFD->getName();
-                if (Name != "malloc" && Name != "calloc" && Name != "realloc" &&
-                    !CalleeFD->hasBody() && !isInRuntimeHeader(CalleeFD->getLocation()) &&
-                    !hasVeriObjCAnnotation(CalleeFD, "objc_nolatency")) {
-                    reportError(CE->getExprLoc(), "VeriObjC Violation: Unannotated extern function '%0' defaults to @cold and cannot be called from a @nolatency context.")
-                        << Name;
-                }
-            }
+            inspectCallSiteEffects(CE, CallerFD, Survivors);
         }
         for (const Stmt *Child : S->children()) {
-            verifyNoLatencyCalls(Child);
+            walkFunctionEffects(Child, CallerFD, Survivors);
         }
+    }
+
+    void auditFunctionEffectsAndReport(const FunctionDecl *FD) {
+        if (!FD || !FD->hasBody()) return;
+        std::vector<std::string> Survivors;
+        walkFunctionEffects(FD->getBody(), FD, Survivors);
+        if (Context->getDiagnostics().hasErrorOccurred() || !Opts.EmitEffectsReport) return;
+
+        if (Survivors.empty()) {
+            llvm::errs() << "[VeriObjC --effects-report] Function: " << FD->getName()
+                         << " | Survivors: 0 (effect-free)\n";
+        } else {
+            for (const std::string &Entry : Survivors) {
+                llvm::errs() << "[VeriObjC --effects-report] Function: " << FD->getName()
+                             << " | " << Entry << "\n";
+            }
+        }
+    }
+
+    bool isAllowedFFIBoundaryType(QualType T) const {
+        if (T.isNull() || T->isVoidType()) return true;
+        if (T->isPointerType() || T->isObjCObjectPointerType() || T->isBlockPointerType() || T->isReferenceType()) {
+            return false;
+        }
+        return findNonFlatField(T) == nullptr;
+    }
+
+    void verifyExportFunctionAndEmitHeader(const FunctionDecl *D) {
+        if (!isAllowedFFIBoundaryType(D->getReturnType())) {
+            reportError(D->getLocation(), "VeriObjC Violation: Banned cross-boundary ownership: @export function '%0' cannot return non-flat type across FFI boundary.")
+                << D->getName();
+            return;
+        }
+        for (const ParmVarDecl *PVD : D->parameters()) {
+            if (!isAllowedFFIBoundaryType(PVD->getType())) {
+                reportError(PVD->getLocation(), "VeriObjC Violation: Banned cross-boundary ownership: @export function '%0' parameter '%1' is non-flat across FFI boundary.")
+                    << D->getName() << PVD->getName();
+                return;
+            }
+        }
+        if (!Opts.EmitExportHeader) return;
+
+        for (const auto *A : D->specific_attrs<AnnotateAttr>()) {
+            llvm::StringRef Ann = A->getAnnotation();
+            if (Ann.starts_with("objc_pre:")) {
+                llvm::errs() << "// @pre(" << Ann.drop_front(9) << ")\n";
+            } else if (Ann.starts_with("objc_post:")) {
+                llvm::errs() << "// @post(" << Ann.drop_front(10) << ")\n";
+            }
+        }
+        llvm::errs() << "extern " << D->getReturnType().getAsString() << " " << D->getName() << "(";
+        for (unsigned i = 0; i < D->getNumParams(); ++i) {
+            if (i > 0) llvm::errs() << ", ";
+            llvm::errs() << D->getParamDecl(i)->getType().getAsString() << " " << D->getParamDecl(i)->getName();
+        }
+        llvm::errs() << ");\n";
+    }
+
+    const EnumDecl *extractVVariantTagEnum(const Expr *Cond, llvm::StringRef &OutVariantName) const {
+        if (!Cond) return nullptr;
+        const auto *ME = dyn_cast<MemberExpr>(Cond->IgnoreParenImpCasts());
+        if (!ME) return nullptr;
+        const auto *RT = ME->getBase()->IgnoreParenImpCasts()->getType()->getAs<RecordType>();
+        const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+        if (!RD || !hasVeriObjCAnnotation(RD, "objc_vvariant")) return nullptr;
+
+        const auto *ET = ME->getType()->getAs<EnumType>();
+        if (!ET) return nullptr;
+        OutVariantName = RD->getName();
+        return ET->getDecl();
+    }
+
+    void handleMonoInstantiateCall(CallExpr *E) {
+        if (E->getNumArgs() < 4) return;
+        const auto *PkgSL = dyn_cast<StringLiteral>(E->getArg(0)->IgnoreParenImpCasts());
+        const auto *GenSL = dyn_cast<StringLiteral>(E->getArg(1)->IgnoreParenImpCasts());
+        int64_t Bytes = 0, Budget = 0;
+        if (!PkgSL || !GenSL || !evalConstPair(E->getArg(2), E->getArg(3), Bytes, Budget)) return;
+
+        llvm::StringRef Pkg = PkgSL->getString();
+        llvm::StringRef Gen = GenSL->getString();
+        std::string Key = (Pkg + "::" + Gen).str();
+        MonoGenericEntry &Entry = MonoGenericStats[Key];
+        Entry.Package = Pkg.str();
+        Entry.GenericName = Gen.str();
+
+        bool IsSpecializedKey = Gen.contains('<');
+        if (IsSpecializedKey && Entry.UniqueCount > 0) {
+            Entry.DedupedCount++;
+            return;
+        }
+        Entry.UniqueCount++;
+        Entry.CodeBytes += static_cast<uint32_t>(Bytes);
+        if (Entry.UniqueCount > static_cast<unsigned>(Budget)) {
+            reportError(E->getExprLoc(), "VeriObjC Violation: Monomorphization budget exceeded in package '%0' for generic '%1' (%2 instantiations exceeds limit %3).")
+                << Pkg << Gen << Entry.UniqueCount << static_cast<unsigned>(Budget);
+        }
+    }
+
+    void recordDAGEdgeCall(CallExpr *E) {
+        if (E->getNumArgs() < 3) return;
+        const auto *FromSL = dyn_cast<StringLiteral>(E->getArg(0)->IgnoreParenImpCasts());
+        const auto *ToSL = dyn_cast<StringLiteral>(E->getArg(1)->IgnoreParenImpCasts());
+        int64_t WCET = 0, Dummy = 0;
+        if (!FromSL || !ToSL || !evalConstPair(E->getArg(2), E->getArg(2), WCET, Dummy)) return;
+        DAGEdges.push_back({FromSL->getString().str(), ToSL->getString().str(), static_cast<uint32_t>(WCET), E->getExprLoc()});
     }
 
     bool analyzeAndRewriteBody(Stmt *Body, DeclContext *DC) {
@@ -1462,11 +1727,27 @@ private:
     }
 
 public:
-    explicit VeriObjCVisitor(ASTContext *Context, bool EmitHwReport = false)
-        : Context(Context), EmitHwReport(EmitHwReport) {}
+    explicit VeriObjCVisitor(ASTContext *Context, VeriObjCPluginOptions Opts = {})
+        : Context(Context), Opts(Opts) {}
 
     std::vector<FunctionDecl *> &getSynthesizedDefs() { return SynthesizedDefs; }
     std::vector<Decl *> &getSynthesizedVarDefs() { return SynthesizedVarDefs; }
+
+    void finalizeTranslationUnitAudits() {
+        verifyMultiFrameErrorReturns();
+        uint32_t UnusedWCET = 0;
+        verifyTaskDAGAndComputeWCET(SourceLocation(), UnusedWCET);
+        if (!Context->getDiagnostics().hasErrorOccurred() && Opts.EmitMonoReport) {
+            for (const auto &KV : MonoGenericStats) {
+                const MonoGenericEntry &E = KV.getValue();
+                llvm::errs() << "[VeriObjC --mono-report] Package: " << E.Package
+                             << " | Generic: " << E.GenericName
+                             << " | Instantiations: " << E.UniqueCount
+                             << " (Deduplicated: " << E.DedupedCount
+                             << ") | Bytes: " << E.CodeBytes << " | Strategy: @mono\n";
+            }
+        }
+    }
 
     bool VisitVarDecl(VarDecl *D) {
         QualType T = D->getType();
@@ -1484,7 +1765,40 @@ public:
                 T = Deduced;
             }
         }
+        if (const auto *RT = T->getAs<RecordType>()) {
+            const RecordDecl *RD = RT->getDecl()->getDefinition();
+            if (RD && hasVeriObjCAnnotation(RD, "objc_inplace_only") && D->getInit()) {
+                if (isa<DeclRefExpr>(D->getInit()->IgnoreParenImpCasts())) {
+                    reportError(D->getLocation(), "VeriObjC Violation: Intermediate copy of built-in-place type '%0' is banned; thread destination slot via veriobjc_push_inplace.")
+                        << RD->getName();
+                }
+            }
+        }
         if (hasVeriObjCAnnotation(D, "objc_flat")) checkFlatPayloadType(T, D->getName(), D->getLocation());
+        return true;
+    }
+
+    bool VisitSwitchStmt(SwitchStmt *SS) {
+        llvm::StringRef VariantName;
+        const EnumDecl *ED = extractVVariantTagEnum(SS->getCond(), VariantName);
+        if (!ED) return true;
+
+        llvm::DenseSet<int64_t> HandledValues;
+        for (const SwitchCase *SC = SS->getSwitchCaseList(); SC; SC = SC->getNextSwitchCase()) {
+            if (isa<DefaultStmt>(SC)) return true;
+            if (const auto *CS = dyn_cast<CaseStmt>(SC)) {
+                Expr::EvalResult Res;
+                if (CS->getLHS() && CS->getLHS()->EvaluateAsInt(Res, *Context)) {
+                    HandledValues.insert(Res.Val.getInt().getSExtValue());
+                }
+            }
+        }
+        for (const EnumConstantDecl *ECD : ED->enumerators()) {
+            if (!HandledValues.contains(ECD->getInitVal().getSExtValue())) {
+                reportError(SS->getSwitchLoc(), "VeriObjC Violation: Non-exhaustive vmatch on vvariant '%0': missing case '%1'.")
+                    << VariantName << ECD->getName();
+            }
+        }
         return true;
     }
 
@@ -1502,8 +1816,12 @@ public:
         if (hasVeriObjCAnnotation(D, "objc_specialize")) {
             reportError(D->getLocation(), "VeriObjC Violation: Banned specialization/probing: ad-hoc generic specialization or SFINAE probing is forbidden; use explicit 'where' constraints.");
         }
-        if (hasVeriObjCAnnotation(D, "objc_export") && isInferredSignatureType(D->getReturnType())) {
-            reportError(D->getLocation(), "VeriObjC Violation: Banned inference in signature position: 'auto' return type is not permitted on @export functions.");
+        if (hasVeriObjCAnnotation(D, "objc_export")) {
+            if (isInferredSignatureType(D->getReturnType())) {
+                reportError(D->getLocation(), "VeriObjC Violation: Banned inference in signature position: 'auto' return type is not permitted on @export functions.");
+            } else {
+                verifyExportFunctionAndEmitHeader(D);
+            }
         }
         return true;
     }
@@ -1646,6 +1964,10 @@ public:
             }
         } else if (Name == "__veriobjc_verify_reduce_latency" && E->getNumArgs() >= 2) {
             verifyReduceLatencyCall(E);
+        } else if (Name == "__veriobjc_mono_instantiate") {
+            handleMonoInstantiateCall(E);
+        } else if (Name == "__veriobjc_dag_edge") {
+            recordDAGEdgeCall(E);
         }
         return true;
     }
@@ -1694,7 +2016,7 @@ public:
 
         if (auto *FD = dyn_cast<FunctionDecl>(D)) {
             if (!FD->hasBody()) return;
-            if (hasVeriObjCAnnotation(FD, "objc_nolatency")) verifyNoLatencyCalls(FD->getBody());
+            auditFunctionEffectsAndReport(FD);
             collectErrorReturnGraph(FD->getBody(), FD->getCanonicalDecl());
             if (!analyzeAndRewriteBody(FD->getBody(), FD)) return;
             if (hasVeriObjCAnnotation(FD, "objc_hw_kernel")) {
@@ -1752,8 +2074,8 @@ private:
     bool EmittingSynthesized = false;
 
 public:
-    explicit VeriObjCConsumer(CompilerInstance &CI, bool EmitHwReport = false)
-        : CI(CI), Visitor(&CI.getASTContext(), EmitHwReport) {
+    explicit VeriObjCConsumer(CompilerInstance &CI, VeriObjCPluginOptions Opts = {})
+        : CI(CI), Visitor(&CI.getASTContext(), Opts) {
         CI.getDiagnostics().setSeverity(
             diag::warn_collection_expr_type, diag::Severity::Ignored, SourceLocation()
         );
@@ -1769,7 +2091,7 @@ public:
     }
 
     void HandleTranslationUnit(ASTContext &Context) override {
-        Visitor.verifyMultiFrameErrorReturns();
+        Visitor.finalizeTranslationUnitAudits();
         if (Context.getDiagnostics().hasErrorOccurred()) return;
 
         EmittingSynthesized = true;
@@ -1785,16 +2107,19 @@ public:
 
 class VeriObjCAction : public PluginASTAction {
 private:
-    bool EmitHwReport = false;
+    VeriObjCPluginOptions Opts;
 
 protected:
     std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef) override {
-        return std::make_unique<VeriObjCConsumer>(CI, EmitHwReport);
+        return std::make_unique<VeriObjCConsumer>(CI, Opts);
     }
 
     bool ParseArgs(const CompilerInstance &, const std::vector<std::string> &args) override {
         for (const std::string &A : args) {
-            if (A == "--hw-report") EmitHwReport = true;
+            if (A == "--hw-report") Opts.EmitHwReport = true;
+            else if (A == "--effects-report") Opts.EmitEffectsReport = true;
+            else if (A == "--mono-report") Opts.EmitMonoReport = true;
+            else if (A == "--export-header-stdout") Opts.EmitExportHeader = true;
         }
         return true;
     }
@@ -1804,7 +2129,7 @@ protected:
     }
 };
 
-// Generic attribute handler template eliminating 9 duplicate ParsedAttrInfo classes
+// Generic attribute handler template eliminating duplicate ParsedAttrInfo classes
 template <const char *AttrName>
 struct VeriObjCAnnotateAttrInfo : public ParsedAttrInfo {
     VeriObjCAnnotateAttrInfo() {
@@ -1823,15 +2148,26 @@ struct VeriObjCAnnotateAttrInfo : public ParsedAttrInfo {
     }
 };
 
-inline constexpr char kAttrSealed[]     = "objc_sealed";
-inline constexpr char kAttrFinal[]      = "objc_final";
-inline constexpr char kAttrConsumed[]   = "objc_consumed";
-inline constexpr char kAttrFlat[]       = "objc_flat";
-inline constexpr char kAttrVConstexpr[] = "objc_vconstexpr";
-inline constexpr char kAttrExport[]     = "objc_export";
-inline constexpr char kAttrHwKernel[]   = "objc_hw_kernel";
-inline constexpr char kAttrNolatency[]  = "objc_nolatency";
-inline constexpr char kAttrSpecialize[] = "objc_specialize";
+inline constexpr char kAttrSealed[]             = "objc_sealed";
+inline constexpr char kAttrFinal[]              = "objc_final";
+inline constexpr char kAttrConsumed[]           = "objc_consumed";
+inline constexpr char kAttrFlat[]               = "objc_flat";
+inline constexpr char kAttrVConstexpr[]         = "objc_vconstexpr";
+inline constexpr char kAttrExport[]             = "objc_export";
+inline constexpr char kAttrHwKernel[]           = "objc_hw_kernel";
+inline constexpr char kAttrNolatency[]          = "objc_nolatency";
+inline constexpr char kAttrPure[]               = "objc_pure";
+inline constexpr char kAttrCold[]               = "objc_cold";
+inline constexpr char kAttrEffectAlloc[]        = "objc_effect_alloc";
+inline constexpr char kAttrEffectIo[]           = "objc_effect_io";
+inline constexpr char kAttrEffectBlocking[]     = "objc_effect_blocking";
+inline constexpr char kAttrEffectFence[]        = "objc_effect_fence";
+inline constexpr char kAttrEffectSharedRetain[] = "objc_effect_shared_retain";
+inline constexpr char kAttrSoA[]                = "objc_soa";
+inline constexpr char kAttrVVariant[]           = "objc_vvariant";
+inline constexpr char kAttrVTrait[]             = "objc_vtrait";
+inline constexpr char kAttrInplaceOnly[]        = "objc_inplace_only";
+inline constexpr char kAttrSpecialize[]         = "objc_specialize";
 
 } // namespace
 
@@ -1858,6 +2194,39 @@ static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrHwKernel>> Attr
 );
 static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrNolatency>> AttrNolatency(
     "objc_nolatency", "Mark VeriObjC function as a zero-allocation, non-blocking @nolatency path"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrPure>> AttrPure(
+    "objc_pure", "Mark VeriObjC function as effect-free @pure"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrCold>> AttrCold(
+    "objc_cold", "Mark VeriObjC function as @cold diagnostic quarantine"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrEffectAlloc>> AttrEffectAlloc(
+    "objc_effect_alloc", "Declare @alloc effect on function signature"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrEffectIo>> AttrEffectIo(
+    "objc_effect_io", "Declare @io effect on function signature"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrEffectBlocking>> AttrEffectBlocking(
+    "objc_effect_blocking", "Declare @blocking effect on function signature"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrEffectFence>> AttrEffectFence(
+    "objc_effect_fence", "Declare @fence effect on function signature"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrEffectSharedRetain>> AttrEffectSharedRetain(
+    "objc_effect_shared_retain", "Declare @shared-retain effect on function signature"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrSoA>> AttrSoA(
+    "objc_soa", "Mark struct as Struct-of-Arrays (SoA) cache-aligned layout"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrVVariant>> AttrVVariant(
+    "objc_vvariant", "Mark struct as a closed-set vvariant algebraic data type"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrVTrait>> AttrVTrait(
+    "objc_vtrait", "Mark function as a closed compile-time vtrait table"
+);
+static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrInplaceOnly>> AttrInplaceOnly(
+    "objc_inplace_only", "Require destination-slot built-in-place construction (forbid copies)"
 );
 static ParsedAttrInfoRegistry::Add<VeriObjCAnnotateAttrInfo<kAttrSpecialize>> AttrSpecialize(
     "objc_specialize", "Detect banned ad-hoc generic specialization / SFINAE probing"

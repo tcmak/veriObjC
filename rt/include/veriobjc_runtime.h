@@ -403,12 +403,130 @@ typedef struct __veriobjc_inferred_auto {
     int64_t __opaque;
 } vauto;
 
-#define veriobjc_export __attribute__((objc_export))
-#define veriobjc_nolatency __attribute__((objc_nolatency))
-#define veriobjc_specialize __attribute__((objc_specialize))
+#define veriobjc_export               __attribute__((objc_export))
+#define veriobjc_nolatency            __attribute__((objc_nolatency))
+#define veriobjc_pure                 __attribute__((objc_pure))
+#define veriobjc_cold                 __attribute__((objc_cold))
+#define veriobjc_effect_alloc         __attribute__((objc_effect_alloc))
+#define veriobjc_effect_io            __attribute__((objc_effect_io))
+#define veriobjc_effect_blocking      __attribute__((objc_effect_blocking))
+#define veriobjc_effect_fence         __attribute__((objc_effect_fence))
+#define veriobjc_effect_shared_retain __attribute__((objc_effect_shared_retain))
+#define veriobjc_pre(cond_str)        __attribute__((annotate("objc_pre:" cond_str)))
+#define veriobjc_post(cond_str)       __attribute__((annotate("objc_post:" cond_str)))
+#define veriobjc_packed               __attribute__((packed))
+#define veriobjc_aligned(n)           __attribute__((aligned(n)))
+#define vstatic_assert(cond, msg)     _Static_assert(cond, msg)
+#define veriobjc_specialize           __attribute__((objc_specialize))
 #define vauto_borrow(var, expr) auto var = &(expr)
 #define vstrong_def(Name, UnderlyingType) \
     typedef struct { UnderlyingType raw; } Name
+
+// ---------------------------------------------------------------------------
+// Compile-Time Reflection (@reflect), SoA Transmuter (objc_soa),
+// vvariant / vmatch, vtrait, Monomorphization Budgets, Static Topology &
+// Fixed Task DAGs (vasync), and Built-in-Place Construction (Section 2.8)
+// ---------------------------------------------------------------------------
+
+#define veriobjc_soa          __attribute__((objc_soa, objc_flat, aligned(64)))
+#define veriobjc_vvariant     __attribute__((objc_vvariant, objc_flat))
+#define veriobjc_inplace_only __attribute__((objc_inplace_only, objc_flat))
+#define vmatch(variant_expr)  switch ((variant_expr).tag)
+#define vtrait                __attribute__((objc_vconstexpr, objc_vtrait)) static inline
+
+#define vsoa_def3(SoAName, Capacity, T1, F1, T2, F2, T3, F3) \
+    struct veriobjc_soa SoAName { \
+        T1 F1[Capacity]; \
+        T2 F2[Capacity]; \
+        T3 F3[Capacity]; \
+    }
+
+static inline uint32_t __veriobjc_reflect_field_count(const void *type_tag) {
+    (void)type_tag;
+    return 0u;
+}
+
+#define veriobjc_reflect_field_count(Type) \
+    __veriobjc_reflect_field_count((const Type *)0)
+
+#define veriobjc_reflect_sizeof(Type) \
+    ((uint32_t)sizeof(Type))
+
+#define veriobjc_reflect_offset(Type, Field) \
+    __builtin_offsetof(Type, Field)
+
+static inline void __veriobjc_mono_instantiate(const char *pkg_name, const char *generic_name, uint32_t code_bytes, uint32_t max_budget) {
+    (void)pkg_name;
+    (void)generic_name;
+    (void)code_bytes;
+    (void)max_budget;
+}
+
+#define vmono_instantiate(pkg, generic_sig, code_bytes, max_budget) \
+    __veriobjc_mono_instantiate((pkg), (generic_sig), (uint32_t)(code_bytes), (uint32_t)(max_budget))
+
+struct veriobjc_core_topology {
+    uint16_t core_id;
+    uint16_t numa_node;
+};
+
+#define veriobjc_core_topology_def(Name, CoreId, NumaNode) \
+    _Static_assert((CoreId) < 256, "VeriObjC topology core_id out of bounds"); \
+    _Static_assert((NumaNode) < 16, "VeriObjC topology numa_node out of bounds"); \
+    static const struct veriobjc_core_topology Name = { .core_id = (uint16_t)(CoreId), .numa_node = (uint16_t)(NumaNode) }
+
+static inline void __veriobjc_dag_edge(const char *from_node, const char *to_node, uint32_t wcet_cycles) {
+    (void)from_node;
+    (void)to_node;
+    (void)wcet_cycles;
+}
+
+static inline uint32_t __veriobjc_dag_critical_path_wcet(void) {
+    return 0u;
+}
+
+#define veriobjc_dag_edge(from_node, to_node, wcet_cycles) \
+    __veriobjc_dag_edge((from_node), (to_node), (uint32_t)(wcet_cycles))
+
+#define veriobjc_dag_critical_path_wcet() \
+    __veriobjc_dag_critical_path_wcet()
+
+enum veriobjc_vasync_status {
+    VERIOBJC_VASYNC_PENDING = 0,
+    VERIOBJC_VASYNC_READY   = 1
+};
+
+struct veriobjc_vasync_frame {
+    uint16_t core_id;
+    uint16_t status;
+    uint32_t result_code;
+};
+
+static inline void veriobjc_vasync_init(struct veriobjc_vasync_frame *frame, uint16_t core_id) {
+    if (!frame) { return; }
+    frame->core_id     = core_id;
+    frame->status      = (uint16_t)VERIOBJC_VASYNC_PENDING;
+    frame->result_code = 0u;
+}
+
+static inline void veriobjc_vasync_wake_irq(struct veriobjc_vasync_frame *frame, uint32_t result_code) {
+    if (!frame) { return; }
+    frame->result_code = result_code;
+    frame->status      = (uint16_t)VERIOBJC_VASYNC_READY;
+}
+
+static inline bool veriobjc_vasync_is_ready(const struct veriobjc_vasync_frame *frame) {
+    if (!frame) { return false; }
+    return frame->status == (uint16_t)VERIOBJC_VASYNC_READY;
+}
+
+#define veriobjc_push_inplace(array_base, count_lval, cap, init_fn, ...) \
+    do { \
+        if ((count_lval) < (cap)) { \
+            init_fn(&(array_base)[(count_lval)], __VA_ARGS__); \
+            (count_lval)++; \
+        } \
+    } while (0)
 
 // ---------------------------------------------------------------------------
 // Hardware Stream Elaboration Substrate (veriStream: Bits<W>, Stream<T, N>)

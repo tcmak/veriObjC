@@ -219,4 +219,22 @@ TEST(VeriObjC_ScopeAndLayout, VeriStreamPrimitivesAndTernaryDatapath) {
     __veriobjc_stream_zip(act, 512, packed_wgt, 512);
     __veriobjc_check_context_cap(512, 2048);
     __veriobjc_verify_reduce_latency(512, 9);
+
+    LONGS_EQUAL(0, __veriobjc_reflect_field_count(nullptr));
+    __veriobjc_mono_instantiate("pkg", "Gen", 64, 16);
+    __veriobjc_dag_edge("a", "b", 10);
+    LONGS_EQUAL(0, __veriobjc_dag_critical_path_wcet());
+
+    struct veriobjc_vasync_frame vf;
+    veriobjc_vasync_init(nullptr, 0);
+    veriobjc_vasync_wake_irq(nullptr, 0);
+    CHECK_FALSE(veriobjc_vasync_is_ready(nullptr));
+
+    veriobjc_vasync_init(&vf, 3);
+    LONGS_EQUAL(3, vf.core_id);
+    CHECK_FALSE(veriobjc_vasync_is_ready(&vf));
+
+    veriobjc_vasync_wake_irq(&vf, 99u);
+    CHECK_TRUE(veriobjc_vasync_is_ready(&vf));
+    LONGS_EQUAL(99u, vf.result_code);
 }

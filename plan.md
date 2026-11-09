@@ -189,30 +189,31 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Dual-direction gate per file (`tests/integration/run_ban_corpus_test.sh`, CTest target `ban_corpus_tests`): compiles `-Werror` clean under **stock Clang 23** *and* fails under the plugin with the exact named diagnostic.
   - Every corpus file pairs with its registry row and the ban's replacement.
 
+
 ### 2.8 Backfill: Effect System, FFI Discipline, Reflection & Topology
 *(Mapped to: `docs/veriobjc-advanced-substrate.md` §2 & §4, the vmeta specification, `docs/veriobjc-poc-execution-plan.md` Module 1 Tasks 7/11/13/14/15, and `docs/veriobjc-ban-list.md` — spec-referenced plugin passes with no prior home in this plan. Before checking these off, verify which ones already have green tests from earlier cycles.)*
 
-- [ ] **Task 2.8.1: Effect Type System & `@nolatency` Enforcement**
-  - Effects on signatures (`@alloc`, `@io`, `@blocking`, `@fence`, `@shared-retain`); contexts `@nolatency` / `@pure`; `@cold` as the quarantine tier.
-  - Effectful call inside a `@nolatency` loop is a compile error (`test_banned_heap_nolatency.m`); `@shared` refcounting outside `@cold` is a compile error (`test_banned_shared_nolatency.m`).
-  - This is the substrate for `--effects-report` (Task 4.2) — audit whether the registry's `@nolatency` rows are backed by a real effect checker or optimistic scaffolding.
-- [ ] **Task 2.8.2: FFI Effect & Boundary Checking**
+- [x] **Task 2.8.1: Effect Type System & `@nolatency` Enforcement [TDD Cycle 22]**
+  - Effects on signatures (`@alloc`, `@io`, `@blocking`, `@fence`, `@shared-retain`); contexts `@nolatency` / `@pure`; `@cold` as the quarantine tier (`veriobjc_effect_*`, `veriobjc_nolatency`, `veriobjc_pure`, `veriobjc_cold`).
+  - Effectful call inside a `@nolatency` or `@pure` loop is a compile error (`test_banned_heap_nolatency.m`, `test_banned_blocking_io.m`); `@shared` refcounting outside `@cold` is a compile error (`test_banned_shared_nolatency.m`, `valid_objc_shared_nolatency.m`).
+  - Implements `--effects-report` survivor reporting per function and source line (`test_valid_effect_system.m`).
+- [x] **Task 2.8.2: FFI Effect & Boundary Checking [TDD Cycle 22]**
   - `extern fn` declares effects; unannotated defaults to `@cold` and is uncallable from `@nolatency`/`@pure` contexts (`test_cold_ffi_call.m`).
-  - Flat values or opaque `vpool` handles only across the boundary; exported layouts pinned (`__packed`/`__align` + `vstatic_assert`); allocator mixing rejected (`test_ffi_stack_ref_export.m`, `test_banned_alloc_mixing.m`).
-  - `@export` functions generate a C header carrying `@pre`/`@post` as documented preconditions.
-- [ ] **Task 2.8.3: Compile-Time Reflection & SoA Transmuter**
-  - `@reflect()` field-offset computation and `__attribute__((objc_soa(Type, N)))` metadata loops lowered at compile time to flat C arrays — no runtime lookup tables.
-- [ ] **Task 2.8.4: `vvariant`/`vmatch` Exhaustiveness & `vtrait` Closed Tables**
-  - `match` lowered to link-time jump tables with compile-time exhaustiveness; adding a `vvariant` case fails every non-exhaustive `match` downstream (pairs with Task 3.5).
-  - `vtrait` closed trait tables evaluated inside the fueled interpreter (`vconstexpr` fuel applies; clean budget-exceeded errors).
-- [ ] **Task 2.8.5: Monomorphization Deduplication & Instantiation Budgets**
-  - Deduplicate instantiations program-wide by mangled key; enforce manifest-declared per-package instantiation and generated-code budgets; excess fails the build naming the package and generic. Supplies the data behind `--mono-report` (Task 4.2); depends on the manifest (Phase 6).
-- [ ] **Task 2.8.6: Static Topology & Fixed Task DAGs**
-  - Build-time core affinity, thread assignment, and NUMA placement declared in the binary layout; no runtime thread creation.
-  - Task DAGs evaluated at compile time: WCET computed as a type-level latency contract; deadlock-freedom discharged via SMACK/Z3 (feeds Task 4.4).
-  - `vasync` futures lowered to compact stack-allocated state structs, woken only by explicit hardware interrupt hooks — no polling rings.
-- [ ] **Task 2.8.7: Built-in-Place Construction Verification**
-  - `push(parse(...))` destination threading: the destination slot is threaded down as an out-parameter at the IR level; no intermediate copies for construction chains or by-value returns of growable arrays.
+  - Flat values or opaque `vpool` handles (`struct veriobjc_handle`) only across the `@export` boundary (`test_banned_ffi_nonflat_export.m`); exported layouts pinned (`veriobjc_packed`/`veriobjc_aligned` + `vstatic_assert`); allocator mixing rejected (`test_ffi_stack_ref_export.m`, `test_banned_alloc_mixing.m`).
+  - `@export` functions generate a C header (`--export-header-stdout`) carrying `@pre`/`@post` as documented preconditions (`test_valid_ffi_export.m`).
+- [x] **Task 2.8.3: Compile-Time Reflection & SoA Transmuter [TDD Cycle 23]**
+  - `@reflect()` field-count (`veriobjc_reflect_field_count`), `sizeof` (`veriobjc_reflect_sizeof`), and field-offset (`veriobjc_reflect_offset`) computation plus `vsoa_def3` (`__attribute__((objc_soa))`) lowered at compile time to flat, 64-byte-aligned C arrays (`test_valid_reflect_soa.m`, `examples/static_dag_soa_pipeline.m`).
+- [x] **Task 2.8.4: `vvariant`/`vmatch` Exhaustiveness & `vtrait` Closed Tables [TDD Cycle 23]**
+  - `vmatch` verified for compile-time exhaustiveness over `objc_vvariant` tag enums; missing a case fails compilation naming the `vvariant` and missing case (`test_banned_nonexhaustive_match.m`, `test_valid_vvariant_match.m`).
+  - `vtrait` closed trait tables evaluated inside the fueled `vconstexpr` interpreter (`objc_vtrait`).
+- [x] **Task 2.8.5: Monomorphization Deduplication & Instantiation Budgets [TDD Cycle 23]**
+  - Deduplicates identical non-capturing function blocks and specialized generics program-wide by canonical signature/body key; enforces per-package instantiation budgets (`vmono_instantiate`, `test_banned_mono_budget.m`, `test_valid_mono_dedup.m`) and emits `--mono-report`.
+- [x] **Task 2.8.6: Static Topology & Fixed Task DAGs [TDD Cycle 24]**
+  - Build-time core affinity and NUMA placement declared in the binary layout (`veriobjc_core_topology_def`); no runtime thread creation.
+  - Task DAGs evaluated at compile time (`veriobjc_dag_edge`, `veriobjc_dag_critical_path_wcet`): cycles rejected at compile time (`test_banned_dag_cycle.m`) and critical-path WCET folded to an integer constant (`test_valid_static_dag_vasync.m`).
+  - `vasync` futures lowered to compact stack-allocated state structs (`struct veriobjc_vasync_frame`), woken by explicit hardware interrupt hooks (`veriobjc_vasync_wake_irq`).
+- [x] **Task 2.8.7: Built-in-Place Construction Verification [TDD Cycle 24]**
+  - Destination-slot threading (`veriobjc_push_inplace`) constructs records directly in the target array slot; intermediate copies of `veriobjc_inplace_only` types are rejected at compile time (`test_banned_temp_copy_inplace.m`, `test_valid_inplace_construct.m`).
 
 ---
 
@@ -252,6 +253,14 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [ ] **Task 3.14: Contracts Library (`<vstd/contracts.h>`)**
   - `@pre`/`@post` library surface with postcondition-to-SMT helpers; pairs with Task 4.4 (the proof integration consumes what this emits).
 
+### Phase 3 Gate: Library Cohesion & Minimal Binaries
+*(vstd stays a layered library, not an umbrella: leaf headers stay leaf; a hello world imports nothing.)*
+
+- [ ] **Task 3.15: Cohesion & Minimal-Binary Gate**
+  - **Hello-world proof (hosted):** `examples/hello_world.m` — zero vstd imports, `extern fn printf` declared `@io @cold`; links against `rt/` alone. Binary size published as a CI-diffed artifact (the number lives in CI, not in docs — no number, no claim).
+  - **Bare-metal variant:** `examples/hello_uart.m` imports only the `<vstd/io.h>` closure (+ `sys0/` boot); no other vstd section linked.
+  - **Header-closure budget:** each `<vstd/*.h>` compiles standalone against only its declared layer dependencies (`tests/integration/check_vstd_cohesion.sh`, CTest target `vstd_cohesion_tests`); a header that grows a new transitive dependency fails the gate until the layer table is updated in the same PR.
+  - Dead-strip assertion: `--gc-sections` audit that a binary importing only `<vstd/string.h>` contains no container/substrate code (`nm` on section symbols).
 
 ---
 
@@ -279,6 +288,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified disassembly and symbol tables contain **0 calls to `objc_msgSend` / `objc_msg_lookup`** and **0 undefined external symbols** in freestanding kernel mode.
 - [x] **Task 5.2: Round-Trip Snapshot Persistence**
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.
+  - *Format extraction into the versioned external contract (producers outside this repo) is tracked as Task 5.6.*
 - [x] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
   - Compile `examples/ternary_glu_block.m` through the HLS flow (`--hw-report`); assert the synthesis report shows **0 DSP blocks** and `ternary_dot<512>` elaborates to exactly `log2(512) = 9` reduce stages with `@latency(cycles = 9)`.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
@@ -286,9 +296,23 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - *Scope note: Task 5.3 is the plugin-emitted elaboration-level gate (the plugin refuses to emit multiplication, so its own model cannot contain DSPs). This task closes the loop with a real synthesis flow — the original spec's "post-synthesis vendor report" criterion.*
   - Named, version-pinned synthesis toolchain (vendor HLS or open flow) invoked from CI; **DSP = 0 and BRAM weight-pinning read from the vendor utilization report**, not the plugin's self-report.
   - Timing closure at the target clock against the declared `@latency(cycles = 9)`; C/RTL cosimulation equivalence for `examples/ternary_glu_block.m` against the C model over a test corpus.
+  - Cosim oracle: the quantized reference interpreter from the external TernaryTape.jl project (a conforming producer of the Tape Format Spec, Task 5.6) supplies the golden model — consumed as committed fixtures; **no Julia toolchain enters VeriObjC CI**.
   - Negative test: corrupted weight tape rejected by `veriobjc_from_bytes` → kernel never loads, nothing reaches the hardware boundary.
   - Manifest-declared LUT budget checked against the vendor's LUT count (depends on Phase 6 manifest).
   - Acceptance: synthesis report, utilization table, and cosim log committed as reproducible artifacts; any DSP block or timing violation fails the build.
+- [ ] **Task 5.5: Mixed-Size Sealed Hierarchy Composition Test (Upcast Dispatch + Scope Reset)**
+  - *The seam found in external review: every ingredient is tested separately (sealed dispatch, one-store reset, root safety), but never the composition. A claim that isn't tested isn't a claim.*
+  - Scenario: multiple concrete subclasses of one sealed hierarchy, **with differing ivar counts and sizes**, allocated within a single `@scoped` block on one data stack and referenced through **superclass-typed pointers**.
+  - TDD: red test first — `tests/unit_rt/TestSealedMixedScope.cpp` (CppUTest) plus `examples/sealed_mixed_scope.m` added to the `examples_smoke_tests` gate.
+  - Acceptance criteria:
+    - Upcast dispatch: every message through a superclass-typed reference resolves via the perfect-hashed matrix + `isa` discrimination — **zero `objc_msgSend` / `objc_msg_lookup`** (`nm` / `llvm-objdump` audit); subclass ivars intact (no slicing).
+    - One-store reset under heterogeneity: scope exit restores the stack top to the scope mark in **exactly one `movq`** despite mixed concrete sizes (`llvm-objdump` audit).
+    - No escape: storing any upcast (superclass-typed) reference into an outer-scope destination fails with the reference-root diagnostic; all upcast references are dead at scope exit.
+    - 100% region/function/branch coverage on the new paths (`llvm-cov`).
+- [ ] **Task 5.6: Tape Format Specification v1 & Golden Vector Corpus**
+  - Extract the `veriobjc_to_bytes` / `veriobjc_from_bytes` framing, checksum, and self-relative link rules into a versioned, byte-exact spec (`docs/veriobjc-tape-format.md`) — the contract every external producer (TernaryTape.jl/Lux, PyTorch/BitNet-style, C++ tools) encodes against. `rt/` is authoritative until the spec is reconciled against it.
+  - Golden vector corpus: named accept fixtures plus per-byte mutation expectations — every byte index in a small reference tape must have a mutation that flips accept → reject (extends the existing exhaustive sweep in `TestTapeAndRelPtr.cpp`, Task 5.2).
+  - Dual-direction corpus gate for external tapes: committed fixtures produced by external encoders must load clean and be rejected under mutation. CI runs the C loader only — **no producer toolchain (Julia or otherwise) is ever required in VeriObjC CI**.
 
 ---
 
@@ -298,6 +322,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [ ] **Task 6.1: `vpm` Bootstrap & Content-Addressed Store**
   - Single static Go binary; downloads, verifies, and pins the exact Clang/LLVM toolchain — `vpm` must never depend on the toolchain it provisions.
   - Content-addressed store for artifacts (weight tapes, snapshot images) with manifest-recorded provenance (training run ID, quantization params, hash).
+  - Provenance is **producer-agnostic**: any conforming encoder (TernaryTape.jl/Lux, PyTorch/BitNet-style, C++ tools) may write artifacts; the store and loader depend only on the Tape Format Spec (Task 5.6), never on a producer's toolchain.
 - [ ] **Task 6.2: Manifest & Budget Enforcement**
   - Manifest-declared budgets actually enforced at build time: instantiation and generated-code bytes (Task 2.8.5), `vregex` table bytes, generated-data budget, and the LUT budget (Task 2.6.3).
   - Exceeding any budget fails the build naming the package and the offending item.

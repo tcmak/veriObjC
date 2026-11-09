@@ -26,6 +26,8 @@ No single language builds this project — the architecture forces a split, and 
 
 **Self-hosting endpoint:** the `vconstexpr` interpreter is already an interpreter for a VeriObjC subset; rewriting the runtime in VeriObjC itself is the natural final milestone (the same path C compilers took) and is explicitly out of scope for this PoC.
 
+**`vpm` and self-hosting:** the package manager is deliberately *not* a dogfooding target. Two structural reasons: (1) the bootstrap paradox — `vpm` provisions the toolchain, so it can never require that toolchain to build; (2) its workload (network downloads, TLS, untrusted-manifest parsing, ops-machine filesystem churn) is precisely the `@cold`/`@io` territory VeriObjC is built to quarantine, not host. The honest dogfooding order is `rt/` → `vstd` → tooling. *Partial-dogfood option when Phase 3 lands:* keep the bootstrap downloader a boring static Go binary, but migrate the pure-data half of `vpm` — manifest checking, budget enforcement, report diffing — into a VeriObjC-hosted tool, compiled by the pinned toolchain it audits.
+
 ---
 
 ## 🛠️ Module 1: Clang Ownership State Machine (Compiler Plugin)
@@ -69,6 +71,7 @@ The frontend plugin must statically intercept the Abstract Syntax Tree (AST), bl
 - **FFI Discipline:** An `extern fn` without declared effects is treated as `@cold`; calling it from a `@nolatency` context fails compilation. Handing a data-stack reference or pool slot across the FFI boundary fails compilation.
 - **Regex Worst Case Is a Theorem:** A `vregex` match over a `@pre`-bounded input executes exactly `cap` table loads with an empty `--effects-report` entry; a backreference/lookaround pattern fails to compile with a suggested rewrite; a state-explosion pattern fails the byte budget naming the pattern — never a hang, never an OOM.
 - **Stream Elaboration Discipline:** A width-mismatched `zip` fails to compile; a `ternary_dot<512>` reports exactly `log2(512) = 9` reduce stages and `@latency(cycles = 9)`; a context exceeding the declared `ContextCap` fails to compile; the post-synthesis report asserts **zero DSP blocks**, or the build fails.
+- **Mixed-Size Sealed Scope Composition:** Allocating multiple concrete subclasses of **differing sizes** within one scoped data-stack block, dispatching through superclass-typed references, and resetting the scope must compose correctly: the reset is a single store despite heterogeneous sizes (bump reset is size-independent — it restores the scope mark, it does not walk objects), dispatch reads `isa` with zero `objc_msgSend`, and storing an upcast reference past its root scope is a compile error (TDD plan Task 5.5).
 
 ### 🧪 Verification &amp; Testing Strategy: How Do We Know It Works?
 
