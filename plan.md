@@ -290,12 +290,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.
   - *Format extraction into the versioned external contract (producers outside this repo) is tracked as Task 5.6.*
 - [x] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
-  - Compile `examples/ternary_glu_block.m` through the HLS flow (`--hw-report`); assert the synthesis report shows **0 DSP blocks** and `ternary_dot<512>` elaborates to exactly `log2(512) = 9` reduce stages with `@latency(cycles = 9)`.
+  - Compile `examples/ternary_glu_block.m` through the HLS flow (`--hw-report`); assert the synthesis report shows **0 DSP blocks**, `ternary_dot<512>` elaborates to `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) has `@latency(cycles = 10)`.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
 - [ ] **Task 5.4: Vendor Synthesis Validation & RTL Equivalence**
   - *Scope note: Task 5.3 is the plugin-emitted elaboration-level gate (the plugin refuses to emit multiplication, so its own model cannot contain DSPs). This task closes the loop with a real synthesis flow — the original spec's "post-synthesis vendor report" criterion.*
   - Named, version-pinned synthesis toolchain (vendor HLS or open flow) invoked from CI; **DSP = 0 and BRAM weight-pinning read from the vendor utilization report**, not the plugin's self-report.
-  - Timing closure at the target clock against the declared `@latency(cycles = 9)`; C/RTL cosimulation equivalence for `examples/ternary_glu_block.m` against the C model over a test corpus.
+  - Timing closure at the target clock against the declared `@latency(cycles = 9)` for `ternary_dot<512>` and `@latency(cycles = 10)` for `TernaryGLUBlock`; C/RTL cosimulation equivalence for `examples/ternary_glu_block.m` against the C model over a test corpus.
   - Cosim oracle: the quantized reference interpreter from the external TernaryTape.jl project (a conforming producer of the Tape Format Spec, Task 5.6) supplies the golden model — consumed as committed fixtures; **no Julia toolchain enters VeriObjC CI**.
   - Negative test: corrupted weight tape rejected by `veriobjc_from_bytes` → kernel never loads, nothing reaches the hardware boundary.
   - Manifest-declared LUT budget checked against the vendor's LUT count (depends on Phase 6 manifest).

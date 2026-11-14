@@ -166,7 +166,7 @@ __attribute__((objc_sealed))
 @end
 
 // The closed world schedules the whole block from contracts:
-//   shift: 0 cycles (a wire)   2 × ternary_dot: 9 cycles   glu gate: 1 cycle
+//   shift: 1 cycle (register)   2 × ternary_dot: 9 cycles (parallel)   glu gate: 0 cycles (mux ladder)
 //   => @latency(cycles = 10), @throughput(1 per clock), DSP count = 0
 //      (asserted against the vendor synthesis report in CI via --hw-report).
 ```

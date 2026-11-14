@@ -148,5 +148,5 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 - [`INSTALL.md`](INSTALL.md) — toolchain bootstrap on a fresh machine
 - [`BUILDING.md`](BUILDING.md) — toolchain setup (Clang 23, CppUTest, CMake) and CLI guide
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — TDD workflow: no task merges without its red test first
-- [`examples/EXAMPLES.md`](examples/EXAMPLES.md) — guide to positive examples and the Valid-ObjC Rejection Corpus
+- [`examples/README.md`](examples/README.md) — guide to positive examples and the Valid-ObjC Rejection Corpus
 - [`docs/coming-to-veriobjc-a-guide-by-programming-background.md`](docs/coming-to-veriobjc-a-guide-by-programming-background.md) — "Coming to VeriObjC" from ObjC, C++, Rust, or Go
