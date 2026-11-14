@@ -107,6 +107,15 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_kv_arena_overflow.m)
             EXPECTED_DIAG="Context cap exceeded — compile error"
             ;;
+        valid_objc_dma_ring_overflow.m)
+            EXPECTED_DIAG="DMA ring capacity exceeded"
+            ;;
+        valid_objc_vasync_poll_ring.m)
+            EXPECTED_DIAG="Banned polling ring in vasync pipeline"
+            ;;
+        valid_objc_raw_simd_intrinsic.m)
+            EXPECTED_DIAG="Raw SIMD intrinsic in @nolatency code is banned"
+            ;;
         *)
             echo "[FAIL] Unmapped corpus file $base_name in Ban Registry!"
             exit 1

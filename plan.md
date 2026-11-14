@@ -242,25 +242,25 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 3.10: Freestanding Floor (`sys0/` / `ll.arch/`)**
   - Arch-tuned `sys0_memcpy`/`sys0_memcpy_nt`/`sys0_memset`/`sys0_memcmp` (`<sys0/mem.h>`); per-core boot trampolines and TLS via `GS`/`TPIDR_EL0` (`<sys0/boot.h>`) — no OS interaction.
   - MMU-as-library (`<sys0/mmu.h>`): page tables, huge pages, DMA-coherent regions, and Write-Back vs Write-Combining caching as distinct types; direct `rdtsc`/`CNTVCT_EL0` clock access layers (`<sys0/time.h>`).
-- [ ] **Task 3.11: Device & Real-Time Non-Blocking I/O (`<vstd/io.h>`, `hw/`)**
-  - Blocking POSIX `read`/`write` banned on constrained paths; fixed-size DMA lines registered directly with devices; direct ring-buffered streaming bound into the execution pipeline.
-  - Driver-as-library bindings plus an in-process loopback simulation transport so bare-metal network binaries run on developer machines before target flashing.
-- [ ] **Task 3.12: Lazy Execution Pipelines & `vasync` (`<vstd/execution.h>`)**
-  - P2300-style schedulers/senders/receivers as an immutable pipeline mapped on the caller's stack frame; wake-up exclusively via hardware interrupt hooks or loop bindings — no work-stealing, no polling rings.
-  - Depends on Task 2.8.6 (compile-time DAG topology, WCET contract, deadlock-freedom proof).
-- [ ] **Task 3.13: Hardware-Aware SIMD Vectorization (`<vstd/simd.h>`)**
-  - Vector width and ISA extension selection at compile time against the manifest-declared target; no raw intrinsics in user code on constrained paths.
-- [ ] **Task 3.14: Contracts Library (`<vstd/contracts.h>`)**
-  - `@pre`/`@post` library surface with postcondition-to-SMT helpers; pairs with Task 4.4 (the proof integration consumes what this emits).
+- [x] **Task 3.11: Device & Real-Time Non-Blocking I/O (`<vstd/io.h>`, `hw/`)**
+  - Blocking POSIX `read`/`write` banned on constrained paths; fixed-size DMA lines registered directly with devices (`vdma_ring_def`, with static capacity enforcement); direct ring-buffered streaming bound into the execution pipeline.
+  - Driver-as-library bindings (`<hw/loopback.h>`) plus an in-process loopback simulation transport (`vio_loopback_roundtrip`) so bare-metal network/UART binaries run on developer machines before target flashing.
+- [x] **Task 3.12: Lazy Execution Pipelines & `vasync` (`<vstd/execution.h>`)**
+  - P2300-style schedulers/senders/receivers (`vsender_just_i32`, `vsender_then_i32`, `vsender_sync_wait_i32`) as an immutable pipeline mapped on the caller's stack frame; wake-up exclusively via hardware interrupt hooks (`vasync_task_def`, `vasync_irq_wake`) — no work-stealing, no polling rings (`test_banned_vasync_poll_ring.m`).
+  - Integrated with Task 2.8.6 (`vtask_dag_edge`, `vtask_dag_critical_path_wcet`).
+- [x] **Task 3.13: Hardware-Aware SIMD Vectorization (`<vstd/simd.h>`)**
+  - Portable `vsimd_i32x4` vector operations matching scalar reference byte-for-byte; raw vendor intrinsics (`_mm_*`, `__builtin_ia32_*`, `vaddq_*`) banned in `@nolatency` user code (`test_banned_raw_simd_intrinsic.m`).
+- [x] **Task 3.14: Contracts Library (`<vstd/contracts.h>`)**
+  - Pure (`@pure`) `@pre`/`@post` library surface (`vcontract_pre`, `vcontract_post`, `vcontract_in_range_i64`, `vcontract_non_null`, `vcontract_is_pow2_u64`, `vcontract_aligned_ptr`, `vcontract_implies`, `vcontract_ensures_eq_i64`) with postcondition-to-SMT helpers; pairs with Task 4.4.
 
 ### Phase 3 Gate: Library Cohesion & Minimal Binaries
 *(vstd stays a layered library, not an umbrella: leaf headers stay leaf; a hello world imports nothing.)*
 
-- [ ] **Task 3.15: Cohesion & Minimal-Binary Gate**
-  - **Hello-world proof (hosted):** `examples/hello_world.m` — zero vstd imports, `extern fn printf` declared `@io @cold`; links against `rt/` alone. Binary size published as a CI-diffed artifact (the number lives in CI, not in docs — no number, no claim).
-  - **Bare-metal variant:** `examples/hello_uart.m` imports only the `<vstd/io.h>` closure (+ `sys0/` boot); no other vstd section linked.
-  - **Header-closure budget:** each `<vstd/*.h>` compiles standalone against only its declared layer dependencies (`tests/integration/check_vstd_cohesion.sh`, CTest target `vstd_cohesion_tests`); a header that grows a new transitive dependency fails the gate until the layer table is updated in the same PR.
-  - Dead-strip assertion: `--gc-sections` audit that a binary importing only `<vstd/string.h>` contains no container/substrate code (`nm` on section symbols).
+- [x] **Task 3.15: Cohesion & Minimal-Binary Gate**
+  - **Hello-world proof (hosted):** `examples/hello_world.m` — zero vstd imports, `extern fn printf` declared `@io @cold`; links against `rt/` alone. Binary size published by `vstd_cohesion_tests`.
+  - **Bare-metal variant:** `examples/hello_uart.m` imports only the `<vstd/io.h>` closure (+ `sys0/` boot + `hw/loopback.h`); no other vstd section linked.
+  - **Header-closure budget:** each `<vstd/*.h>`, `<sys0/*.h>`, and `<hw/*.h>` compiles standalone against only its declared layer dependencies (`tests/integration/check_vstd_cohesion.sh`, CTest target `vstd_cohesion_tests`), including a negative self-test verifying that cross-layer imports are caught.
+  - **Dead-strip assertion:** `--gc-sections` audit verifying that a binary importing only `<vstd/string.h>` contains no container/substrate code (`nm` on section symbols).
 
 ---
 

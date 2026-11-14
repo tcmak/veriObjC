@@ -1733,27 +1733,60 @@ private:
         return nullptr;
     }
 
+    static bool containsVAsyncReadyCall(const Stmt *S) {
+        if (!S) return false;
+        if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const FunctionDecl *Callee = CE->getDirectCallee();
+                Callee && Callee->getName() == "__vasync_task_is_ready_raw") {
+                return true;
+            }
+        }
+        for (const Stmt *Child : S->children()) {
+            if (containsVAsyncReadyCall(Child)) return true;
+        }
+        return false;
+    }
+
+    static bool isRawSimdIntrinsicName(llvm::StringRef Name) {
+        return Name.starts_with("_mm_") ||
+               Name.starts_with("_mm256_") ||
+               Name.starts_with("_mm512_") ||
+               Name.starts_with("__builtin_ia32_") ||
+               Name.starts_with("vaddq_");
+    }
+
     void analyzeVResultAndStackArrays(
         const Stmt *S,
         llvm::StringRef EnclosingFnName,
+        bool IsNoLatencyFn,
         llvm::DenseSet<const VarDecl *> &ProvenOkVars,
         llvm::DenseMap<const VarDecl *, const VarDecl *> &ActiveStackArray,
         llvm::DenseMap<const VarDecl *, uint32_t> &VVectorPushCounts,
-        llvm::DenseMap<const VarDecl *, uint32_t> &VHashInsertCounts
+        llvm::DenseMap<const VarDecl *, uint32_t> &VHashInsertCounts,
+        llvm::DenseMap<const VarDecl *, uint32_t> &VDmaRingCounts
     ) {
         if (!S) return;
 
+        if (const auto *WS = dyn_cast<WhileStmt>(S)) {
+            if (containsVAsyncReadyCall(WS->getCond())) {
+                reportError(WS->getWhileLoc(), "VeriObjC Violation: Banned polling ring in vasync pipeline: wake-up must be interrupt-driven without busy-wait loops.");
+            }
+        }
+
         if (const auto *IS = dyn_cast<IfStmt>(S)) {
             analyzeVResultAndStackArrays(
-                IS->getCond(), EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
+                IS->getCond(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+                VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
             const VarDecl *ProvenVD = extractVResultIsOkVar(IS->getCond());
             if (ProvenVD) ProvenOkVars.insert(ProvenVD);
             analyzeVResultAndStackArrays(
-                IS->getThen(), EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
+                IS->getThen(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+                VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
             if (ProvenVD) ProvenOkVars.erase(ProvenVD);
             if (IS->getElse()) {
                 analyzeVResultAndStackArrays(
-                    IS->getElse(), EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
+                    IS->getElse(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+                    VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
             }
             return;
         }
@@ -1779,6 +1812,10 @@ private:
             const FunctionDecl *CalleeFD = CE->getDirectCallee();
             if (CalleeFD) {
                 llvm::StringRef CalleeName = CalleeFD->getName();
+                if (IsNoLatencyFn && isRawSimdIntrinsicName(CalleeName)) {
+                    reportError(CE->getExprLoc(), "VeriObjC Violation: Raw SIMD intrinsic in @nolatency code is banned: '%0'; use <vstd/simd.h>.")
+                        << CalleeName;
+                }
                 if (CalleeName == "__vstack_array_init_raw" && CE->getNumArgs() >= 5) {
                     const VarDecl *ArrVD = extractVarDecl(CE->getArg(0));
                     const VarDecl *StackVD = extractVarDecl(CE->getArg(4));
@@ -1841,13 +1878,33 @@ private:
                                 << static_cast<unsigned>(Res.Val.getInt().getZExtValue()) << ContextCap << ArenaVD->getName();
                         }
                     }
+                } else if (CalleeName == "__vdma_ring_submit_raw" && CE->getNumArgs() >= 1) {
+                    if (const VarDecl *RingVD = extractVarDecl(CE->getArg(0))) {
+                        const auto *RT = RingVD->getType()->getAs<RecordType>();
+                        const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+                        uint32_t RingCap = 0;
+                        if (extractAnnotatedCapacity(RD, "objc_vdma_ring:", RingCap)) {
+                            uint32_t Count = ++VDmaRingCounts[RingVD];
+                            if (Count > RingCap) {
+                                reportError(CE->getExprLoc(), "VeriObjC Violation: DMA ring capacity exceeded on '%0' (capacity %1).")
+                                    << RingVD->getName() << RingCap;
+                            }
+                        }
+                    }
+                } else if (CalleeName == "__vdma_ring_poll_raw" && CE->getNumArgs() >= 1) {
+                    if (const VarDecl *RingVD = extractVarDecl(CE->getArg(0))) {
+                        if (VDmaRingCounts[RingVD] > 0u) {
+                            VDmaRingCounts[RingVD]--;
+                        }
+                    }
                 }
             }
         }
 
         for (const Stmt *Child : S->children()) {
             analyzeVResultAndStackArrays(
-                Child, EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
+                Child, EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+                VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
         }
     }
 
@@ -1861,13 +1918,19 @@ private:
         analyzeScopeRootSafety(Body, 0, VarDeclDepth, StackRootDepth);
 
         llvm::StringRef FnName;
-        if (const auto *FD = dyn_cast_or_null<FunctionDecl>(DC)) FnName = FD->getName();
+        bool IsNoLatencyFn = false;
+        if (const auto *FD = dyn_cast_or_null<FunctionDecl>(DC)) {
+            FnName = FD->getName();
+            IsNoLatencyFn = hasVeriObjCAnnotation(FD, "objc_nolatency") || hasVeriObjCAnnotation(FD, "objc_pure");
+        }
         llvm::DenseSet<const VarDecl *> ProvenOkVars;
         llvm::DenseMap<const VarDecl *, const VarDecl *> ActiveStackArray;
         llvm::DenseMap<const VarDecl *, uint32_t> VVectorPushCounts;
         llvm::DenseMap<const VarDecl *, uint32_t> VHashInsertCounts;
+        llvm::DenseMap<const VarDecl *, uint32_t> VDmaRingCounts;
         analyzeVResultAndStackArrays(
-            Body, FnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
+            Body, FnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+            VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
         if (Context->getDiagnostics().hasErrorOccurred()) return false;
 
         rewriteStmtTree(Body, DC);

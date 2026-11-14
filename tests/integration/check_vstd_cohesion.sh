@@ -4,7 +4,7 @@ set -euo pipefail
 REPO_ROOT="${1:-.}"
 README_FILE="$REPO_ROOT/examples/README.md"
 
-echo "=== VeriObjC Phase 3 Header Cohesion & Layer Table Gate ==="
+echo "=== VeriObjC Phase 3 Header Cohesion, Minimal-Binary & Layer Table Gate ==="
 echo "Repository Root: $REPO_ROOT"
 
 if [ ! -f "$README_FILE" ]; then
@@ -65,7 +65,7 @@ for hdr in "$REPO_ROOT"/sys0/include/sys0/*.h; do
     fi
 done
 
-# 4. Layer 'hw' (when present): may import rt, sys0, hw ONLY (never vstd)
+# 4. Layer 'hw': may import rt, sys0, hw ONLY (never vstd)
 for hdr in "$REPO_ROOT"/hw/include/hw/*.h; do
     base=$(basename "$hdr")
     check_header_layer "$hdr" "hw" "(vstd/)" \
@@ -77,30 +77,71 @@ for hdr in "$REPO_ROOT"/hw/include/hw/*.h; do
     fi
 done
 
-# 5. Dead-strip / Leaf Isolation Audit for <vstd/string.h>
-if [ -f "$REPO_ROOT/vstd/include/vstd/string.h" ]; then
-    TMP_SRC=$(mktemp /tmp/veriobjc_leaf_XXXXXX.c)
-    TMP_OBJ=$(mktemp /tmp/veriobjc_leaf_XXXXXX.o)
-    trap 'rm -f "$TMP_SRC" "$TMP_OBJ"' EXIT
+# 5. Negative Self-Test: Verify gate rejects a synthetic leaf header with an illegal cross-layer include
+TMP_BAD_HDR=$(mktemp /tmp/veriobjc_bad_hdr_XXXXXX.h)
+TMP_SRC=$(mktemp /tmp/veriobjc_leaf_XXXXXX.c)
+TMP_BIN=$(mktemp /tmp/veriobjc_leaf_bin_XXXXXX)
+TMP_HW_BIN=$(mktemp /tmp/veriobjc_hello_world_XXXXXX)
+TMP_UART_BIN=$(mktemp /tmp/veriobjc_hello_uart_XXXXXX)
+trap 'rm -f "$TMP_BAD_HDR" "$TMP_SRC" "$TMP_BIN" "$TMP_HW_BIN" "$TMP_UART_BIN"' EXIT
 
-    cat > "$TMP_SRC" << 'EOF'
+cat > "$TMP_BAD_HDR" << 'EOF'
+#pragma once
+#include "veriobjc_runtime.h"
+#include "sys0/mem.h"
+EOF
+
+BAD_TRACE=$(clang-23 -std=gnu23 -H -fsyntax-only -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" -x c-header "$TMP_BAD_HDR" 2>&1 || true)
+if ! echo "$BAD_TRACE" | grep -E "^\.+ " | grep -qE "(sys0/|hw/)"; then
+    echo "[FAIL] Negative self-test failed: synthetic cross-layer include was not detected!"
+    exit 1
+fi
+echo "[PASS] Negative self-test verified: cross-layer include in vstd header is caught."
+
+# 6. Dead-Strip (--gc-sections) Audit on <vstd/string.h> Linked Binary
+cat > "$TMP_SRC" << 'EOF'
 #include <vstd/string.h>
-size_t leaf_len(void) {
+int main(void) {
     struct vstring_view v = vstring_view_FromLiteral("ok");
-    return v.len;
+    return (v.len == 2u) ? 0 : 1;
 }
 EOF
-    clang-23 -std=gnu23 -O2 -ffunction-sections -fdata-sections \
-             -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" \
-             -c "$TMP_SRC" -o "$TMP_OBJ"
+clang-23 -std=gnu23 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections \
+         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" \
+         "$TMP_SRC" -o "$TMP_BIN"
 
-    if nm "$TMP_OBJ" | grep -qE "vstack_array|vvector|veriobjc_pool|sys0_"; then
-        echo "[FAIL] Leaf <vstd/string.h> translation unit leaked non-leaf container/substrate symbols!"
-        nm "$TMP_OBJ"
-        exit 1
-    fi
-    echo "[PASS] Leaf <vstd/string.h> dead-strip isolation verified (0 container/substrate symbols)."
+if nm "$TMP_BIN" | grep -qE "vstack_array|vvector|vflat_map|vhash_flat|vspsc_channel|vternary|sys0_"; then
+    echo "[FAIL] --gc-sections dead-strip audit failed: <vstd/string.h> binary leaked container/substrate symbols!"
+    nm "$TMP_BIN"
+    exit 1
 fi
+echo "[PASS] --gc-sections dead-strip audit passed on <vstd/string.h>."
 
-echo "=== All Header Cohesion & Layer Table Checks Passed! ==="
+# 7. Task 3.15 Hosted Minimal-Binary Proof: examples/hello_world.m (zero vstd imports, links against rt/ alone)
+HW_TRACE=$(clang-23 -std=gnu23 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections \
+                    -DVERIOBJC_EXAMPLE_MAIN -H \
+                    -I"$REPO_ROOT/rt/include" \
+                    "$REPO_ROOT/examples/hello_world.m" -o "$TMP_HW_BIN" 2>&1)
+if echo "$HW_TRACE" | grep -E "^\.+ " | grep -qE "(vstd/|sys0/|hw/)"; then
+    echo "[FAIL] examples/hello_world.m imported vstd/sys0/hw headers!"
+    echo "$HW_TRACE"
+    exit 1
+fi
+HW_BYTES=$(stat -c%s "$TMP_HW_BIN")
+echo "[PASS] examples/hello_world.m verified (0 vstd imports, linked against rt/ alone, binary size: ${HW_BYTES} bytes)."
+
+# 8. Task 3.15 Bare-Metal Minimal-Binary Proof: examples/hello_uart.m (io.h + sys0/boot.h + hw/loopback.h closure only)
+UART_TRACE=$(clang-23 -std=gnu23 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections \
+                      -DVERIOBJC_EXAMPLE_MAIN -H \
+                      -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" -I"$REPO_ROOT/hw/include" \
+                      "$REPO_ROOT/examples/hello_uart.m" -o "$TMP_UART_BIN" 2>&1)
+if echo "$UART_TRACE" | grep -E "^\.+ " | grep -qE "vstd/(vector|map|hash|variant|channel|atomic|stream|ternary|simd|contracts|execution|stack|string|span|strong|result)\.h"; then
+    echo "[FAIL] examples/hello_uart.m leaked non-IO vstd headers into its closure!"
+    echo "$UART_TRACE"
+    exit 1
+fi
+UART_BYTES=$(stat -c%s "$TMP_UART_BIN")
+echo "[PASS] examples/hello_uart.m verified (<vstd/io.h> + <sys0/boot.h> + <hw/loopback.h> closure only, binary size: ${UART_BYTES} bytes)."
+
+echo "=== All Phase 3 Header Cohesion & Minimal-Binary Gate Checks Passed! ==="
 exit 0

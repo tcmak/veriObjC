@@ -52,6 +52,9 @@ Two artifacts, both CI gates:
 | Inserting beyond `vhash_flat<K, V, CapPow2>` 75% load ceiling | Yes | "vhash_flat load-factor ceiling exceeded" | Size `vhash_flat_def` power-of-two capacity so load <= 75% | `test_banned_vhash_load_ceiling.m` ✓ |
 | Multiple producers writing to one SPSC channel | Yes | "SPSC invariant violated on channel" | Dedicate one `vspsc_channel_def` per producer-consumer pair | `test_banned_spsc_two_producers.m` ✓ |
 | Direct `vatomic<T>` payload access without `vatomic_acquire` | Yes | "Direct vatomic payload access without linear acquire guard" | Scoped linear guard via `vatomic_acquire` | `test_banned_unacquired_vatomic.m` ✓ |
+| Submitting beyond `vdma_ring` static capacity | Yes | "DMA ring capacity exceeded" | Size `vdma_ring_def` capacity for the static burst bound or poll between bursts | `test_banned_dma_ring_overflow.m` ✓ |
+| Busy-wait polling loop on `vasync_task_is_ready` | Yes | "Banned polling ring in vasync pipeline" | Wake `vasync` tasks exclusively via hardware interrupt hooks (`vasync_irq_wake`) | `test_banned_vasync_poll_ring.m` ✓ |
+| Raw vendor SIMD intrinsics in `@nolatency` code | Yes | "Raw SIMD intrinsic in @nolatency code is banned" | Portable `<vstd/simd.h>` operations (`vsimd_i32x4`) | `test_banned_raw_simd_intrinsic.m` ✓ |
 
 ### C. Metaprogramming (vmeta)
 

@@ -34,6 +34,7 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
              -I"$REPO_ROOT/rt/include" \
              -I"$REPO_ROOT/vstd/include" \
              -I"$REPO_ROOT/sys0/include" \
+             -I"$REPO_ROOT/hw/include" \
              -c "$pos_file" \
              -o "$TMP_OBJ"
     if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
@@ -208,6 +209,24 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Unchecked vresult access"
     elif [[ "$base_name" == test_banned_two_stack_arrays* ]]; then
         EXPECTED_MSG="Second live vstack_array"
+    elif [[ "$base_name" == test_banned_vvector_overflow* ]]; then
+        EXPECTED_MSG="vvector push exceeds static capacity"
+    elif [[ "$base_name" == test_banned_vhash_load_ceiling* ]]; then
+        EXPECTED_MSG="vhash_flat load-factor ceiling exceeded"
+    elif [[ "$base_name" == test_banned_vvariant_added_case* ]]; then
+        EXPECTED_MSG="Non-exhaustive vmatch on vvariant"
+    elif [[ "$base_name" == test_banned_spsc_two_producers* ]]; then
+        EXPECTED_MSG="SPSC invariant violated on channel"
+    elif [[ "$base_name" == test_banned_unacquired_vatomic* ]]; then
+        EXPECTED_MSG="Direct vatomic payload access without linear acquire guard"
+    elif [[ "$base_name" == test_banned_kv_arena_overflow* ]]; then
+        EXPECTED_MSG="Context cap exceeded — compile error"
+    elif [[ "$base_name" == test_banned_dma_ring_overflow* ]]; then
+        EXPECTED_MSG="DMA ring capacity exceeded"
+    elif [[ "$base_name" == test_banned_vasync_poll_ring* ]]; then
+        EXPECTED_MSG="Banned polling ring in vasync pipeline"
+    elif [[ "$base_name" == test_banned_raw_simd_intrinsic* ]]; then
+        EXPECTED_MSG="Raw SIMD intrinsic in @nolatency code is banned"
     fi
 
     OUTPUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions \
@@ -216,6 +235,7 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
                       -I"$REPO_ROOT/rt/include" \
                       -I"$REPO_ROOT/vstd/include" \
                       -I"$REPO_ROOT/sys0/include" \
+                      -I"$REPO_ROOT/hw/include" \
                       -c "$test_file" \
                       -o /dev/null 2>&1 || true)
 
