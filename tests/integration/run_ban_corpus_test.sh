@@ -89,6 +89,24 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_two_stack_arrays.m)
             EXPECTED_DIAG="Second live vstack_array"
             ;;
+        valid_objc_vvector_overflow.m)
+            EXPECTED_DIAG="vvector push exceeds static capacity"
+            ;;
+        valid_objc_vhash_load_ceiling.m)
+            EXPECTED_DIAG="vhash_flat load-factor ceiling exceeded"
+            ;;
+        valid_objc_vvariant_added_case.m)
+            EXPECTED_DIAG="Non-exhaustive vmatch on vvariant"
+            ;;
+        valid_objc_spsc_two_producers.m)
+            EXPECTED_DIAG="SPSC invariant violated on channel"
+            ;;
+        valid_objc_unacquired_vatomic.m)
+            EXPECTED_DIAG="Direct vatomic payload access without linear acquire guard"
+            ;;
+        valid_objc_kv_arena_overflow.m)
+            EXPECTED_DIAG="Context cap exceeded — compile error"
+            ;;
         *)
             echo "[FAIL] Unmapped corpus file $base_name in Ban Registry!"
             exit 1

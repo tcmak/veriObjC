@@ -535,7 +535,7 @@ static inline bool veriobjc_vasync_is_ready(const struct veriobjc_vasync_frame *
 #define veriobjc_hw_kernel __attribute__((objc_hw_kernel))
 
 #define vstream_def(Name, ElemType, WidthN) \
-    __attribute__((objc_flat)) \
+    __attribute__((annotate("objc_flat"))) \
     typedef struct { ElemType lanes[WidthN]; } Name
 
 __attribute__((annotate("objc_vconstexpr"))) static inline uint32_t veriobjc_clog2(uint32_t n) {

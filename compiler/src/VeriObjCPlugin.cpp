@@ -232,6 +232,7 @@ private:
     std::map<std::pair<const FunctionDecl *, std::vector<int64_t>>, int64_t> VConstexprMemo;
     llvm::StringMap<VarDecl *> CompiledDFADecls;
     std::vector<Decl *> SynthesizedVarDefs;
+    llvm::DenseMap<const VarDecl *, std::string> SPSCChannelProducer;
     unsigned DFACounter = 0;
     unsigned LastReduceStages = 0;
 
@@ -1646,17 +1647,42 @@ private:
         llvm::errs() << ");\n";
     }
 
-    const EnumDecl *extractVVariantTagEnum(const Expr *Cond, llvm::StringRef &OutVariantName) const {
+    static bool extractAnnotatedCapacity(const RecordDecl *RD, llvm::StringRef Prefix, uint32_t &OutCap) {
+        if (!RD) return false;
+        for (const auto *A : RD->specific_attrs<AnnotateAttr>()) {
+            llvm::StringRef Ann = A->getAnnotation();
+            if (Ann.starts_with(Prefix)) {
+                unsigned Val = 0;
+                if (!Ann.drop_front(Prefix.size()).getAsInteger(10, Val)) {
+                    OutCap = Val;
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    const EnumDecl *extractVVariantTagEnum(const Expr *Cond, std::string &OutVariantName) const {
         if (!Cond) return nullptr;
-        const auto *ME = dyn_cast<MemberExpr>(Cond->IgnoreParenImpCasts());
+        Cond = Cond->IgnoreParenCasts();
+        if (const auto *CE = dyn_cast<CallExpr>(Cond)) {
+            const FunctionDecl *Callee = CE->getDirectCallee();
+            if (Callee && Callee->getName() == "__vvariant_tag_id" && CE->getNumArgs() >= 1) {
+                Cond = CE->getArg(0)->IgnoreParenCasts();
+            }
+        }
+        const auto *ME = dyn_cast<MemberExpr>(Cond);
         if (!ME) return nullptr;
-        const auto *RT = ME->getBase()->IgnoreParenImpCasts()->getType()->getAs<RecordType>();
+        QualType BaseTy = ME->getBase()->IgnoreParenImpCasts()->getType();
+        const auto *RT = BaseTy->getAs<RecordType>();
         const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
-        if (!RD || !hasVeriObjCAnnotation(RD, "objc_vvariant")) return nullptr;
+        if (!RD || (!hasVeriObjCAnnotation(RD, "objc_vvariant") && !hasVeriObjCAnnotation(RD, "objc_variant"))) {
+            return nullptr;
+        }
 
         const auto *ET = ME->getType()->getAs<EnumType>();
         if (!ET) return nullptr;
-        OutVariantName = RD->getName();
+        OutVariantName = !RD->getName().empty() ? RD->getName().str() : BaseTy.getAsString();
         return ET->getDecl();
     }
 
@@ -1709,23 +1735,32 @@ private:
 
     void analyzeVResultAndStackArrays(
         const Stmt *S,
+        llvm::StringRef EnclosingFnName,
         llvm::DenseSet<const VarDecl *> &ProvenOkVars,
-        llvm::DenseMap<const VarDecl *, const VarDecl *> &ActiveStackArray
+        llvm::DenseMap<const VarDecl *, const VarDecl *> &ActiveStackArray,
+        llvm::DenseMap<const VarDecl *, uint32_t> &VVectorPushCounts,
+        llvm::DenseMap<const VarDecl *, uint32_t> &VHashInsertCounts
     ) {
         if (!S) return;
 
         if (const auto *IS = dyn_cast<IfStmt>(S)) {
-            analyzeVResultAndStackArrays(IS->getCond(), ProvenOkVars, ActiveStackArray);
+            analyzeVResultAndStackArrays(
+                IS->getCond(), EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
             const VarDecl *ProvenVD = extractVResultIsOkVar(IS->getCond());
             if (ProvenVD) ProvenOkVars.insert(ProvenVD);
-            analyzeVResultAndStackArrays(IS->getThen(), ProvenOkVars, ActiveStackArray);
+            analyzeVResultAndStackArrays(
+                IS->getThen(), EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
             if (ProvenVD) ProvenOkVars.erase(ProvenVD);
-            if (IS->getElse()) analyzeVResultAndStackArrays(IS->getElse(), ProvenOkVars, ActiveStackArray);
+            if (IS->getElse()) {
+                analyzeVResultAndStackArrays(
+                    IS->getElse(), EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
+            }
             return;
         }
 
         if (const auto *ME = dyn_cast<MemberExpr>(S)) {
-            if (ME->getMemberDecl()->getName() == "value") {
+            llvm::StringRef MemName = ME->getMemberDecl()->getName();
+            if (MemName == "value") {
                 const auto *RT = ME->getBase()->IgnoreParenImpCasts()->getType()->getAs<RecordType>();
                 const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
                 if (RD && hasVeriObjCAnnotation(RD, "objc_vresult")) {
@@ -1735,28 +1770,84 @@ private:
                             << (BaseVD ? BaseVD->getName() : "vresult");
                     }
                 }
+            } else if (MemName == "payload_DoNotAccessDirectly") {
+                reportError(ME->getMemberLoc(), "VeriObjC Violation: Direct vatomic payload access without linear acquire guard.");
             }
         }
 
         if (const auto *CE = dyn_cast<CallExpr>(S)) {
             const FunctionDecl *CalleeFD = CE->getDirectCallee();
-            if (CalleeFD && CalleeFD->getName() == "__vstack_array_init_raw" && CE->getNumArgs() >= 5) {
-                const VarDecl *ArrVD = extractVarDecl(CE->getArg(0));
-                const VarDecl *StackVD = extractVarDecl(CE->getArg(4));
-                if (ArrVD && StackVD) {
-                    auto It = ActiveStackArray.find(StackVD);
-                    if (It != ActiveStackArray.end() && It->second != ArrVD) {
-                        reportError(CE->getExprLoc(), "VeriObjC Violation: Second live vstack_array '%0' on data stack '%1' while '%2' is already active on top of the same stack.")
-                            << ArrVD->getName() << StackVD->getName() << It->second->getName();
-                    } else {
-                        ActiveStackArray[StackVD] = ArrVD;
+            if (CalleeFD) {
+                llvm::StringRef CalleeName = CalleeFD->getName();
+                if (CalleeName == "__vstack_array_init_raw" && CE->getNumArgs() >= 5) {
+                    const VarDecl *ArrVD = extractVarDecl(CE->getArg(0));
+                    const VarDecl *StackVD = extractVarDecl(CE->getArg(4));
+                    if (ArrVD && StackVD) {
+                        auto It = ActiveStackArray.find(StackVD);
+                        if (It != ActiveStackArray.end() && It->second != ArrVD) {
+                            reportError(CE->getExprLoc(), "VeriObjC Violation: Second live vstack_array '%0' on data stack '%1' while '%2' is already active on top of the same stack.")
+                                << ArrVD->getName() << StackVD->getName() << It->second->getName();
+                        } else {
+                            ActiveStackArray[StackVD] = ArrVD;
+                        }
+                    }
+                } else if ((CalleeName == "__vvector_push_raw" || CalleeName == "__vvector_alloc_slot_raw") && CE->getNumArgs() >= 1) {
+                    if (const VarDecl *VecVD = extractVarDecl(CE->getArg(0))) {
+                        const auto *RT = VecVD->getType()->getAs<RecordType>();
+                        const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+                        uint32_t Cap = 0;
+                        if (extractAnnotatedCapacity(RD, "objc_vvector:", Cap)) {
+                            uint32_t Count = ++VVectorPushCounts[VecVD];
+                            if (Count > Cap) {
+                                reportError(CE->getExprLoc(), "VeriObjC Violation: vvector push exceeds static capacity %0 on '%1'.")
+                                    << Cap << VecVD->getName();
+                            }
+                        }
+                    }
+                } else if (CalleeName == "__vhash_flat_insert_u64_i32" && CE->getNumArgs() >= 1) {
+                    if (const VarDecl *MapVD = extractVarDecl(CE->getArg(0))) {
+                        const auto *RT = MapVD->getType()->getAs<RecordType>();
+                        const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+                        uint32_t Cap = 0;
+                        if (extractAnnotatedCapacity(RD, "objc_vhash_flat:", Cap)) {
+                            uint32_t MaxLoad = (Cap * 3u) >> 2u;
+                            uint32_t Count = ++VHashInsertCounts[MapVD];
+                            if (Count > MaxLoad) {
+                                reportError(CE->getExprLoc(), "VeriObjC Violation: vhash_flat load-factor ceiling exceeded on '%0' (max load %1 for capacity %2).")
+                                    << MapVD->getName() << MaxLoad << Cap;
+                            }
+                        }
+                    }
+                } else if (CalleeName == "__vspsc_channel_send_raw" && CE->getNumArgs() >= 1) {
+                    if (const VarDecl *ChanVD = extractVarDecl(CE->getArg(0)); ChanVD && !EnclosingFnName.empty()) {
+                        auto It = SPSCChannelProducer.find(ChanVD);
+                        if (It != SPSCChannelProducer.end() && It->second != EnclosingFnName) {
+                            reportError(CE->getExprLoc(), "VeriObjC Violation: SPSC invariant violated on channel '%0': multiple producers ('%1' and '%2') detected.")
+                                << ChanVD->getName() << It->second << EnclosingFnName;
+                        } else {
+                            SPSCChannelProducer[ChanVD] = EnclosingFnName.str();
+                        }
+                    }
+                } else if (CalleeName == "__vstream_kv_append_raw" && CE->getNumArgs() >= 6) {
+                    if (const VarDecl *ArenaVD = extractVarDecl(CE->getArg(0))) {
+                        const auto *RT = ArenaVD->getType()->getAs<RecordType>();
+                        const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+                        uint32_t ContextCap = 0;
+                        Expr::EvalResult Res;
+                        if (extractAnnotatedCapacity(RD, "objc_kv_arena:", ContextCap) &&
+                            CE->getArg(5)->EvaluateAsInt(Res, *Context) &&
+                            Res.Val.getInt().getZExtValue() >= ContextCap) {
+                            reportError(CE->getExprLoc(), "VeriObjC Violation: Context cap exceeded — compile error: token index %0 exceeds ContextCap %1 on '%2'.")
+                                << static_cast<unsigned>(Res.Val.getInt().getZExtValue()) << ContextCap << ArenaVD->getName();
+                        }
                     }
                 }
             }
         }
 
         for (const Stmt *Child : S->children()) {
-            analyzeVResultAndStackArrays(Child, ProvenOkVars, ActiveStackArray);
+            analyzeVResultAndStackArrays(
+                Child, EnclosingFnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
         }
     }
 
@@ -1769,9 +1860,14 @@ private:
         llvm::DenseMap<const VarDecl *, unsigned> StackRootDepth;
         analyzeScopeRootSafety(Body, 0, VarDeclDepth, StackRootDepth);
 
+        llvm::StringRef FnName;
+        if (const auto *FD = dyn_cast_or_null<FunctionDecl>(DC)) FnName = FD->getName();
         llvm::DenseSet<const VarDecl *> ProvenOkVars;
         llvm::DenseMap<const VarDecl *, const VarDecl *> ActiveStackArray;
-        analyzeVResultAndStackArrays(Body, ProvenOkVars, ActiveStackArray);
+        llvm::DenseMap<const VarDecl *, uint32_t> VVectorPushCounts;
+        llvm::DenseMap<const VarDecl *, uint32_t> VHashInsertCounts;
+        analyzeVResultAndStackArrays(
+            Body, FnName, ProvenOkVars, ActiveStackArray, VVectorPushCounts, VHashInsertCounts);
         if (Context->getDiagnostics().hasErrorOccurred()) return false;
 
         rewriteStmtTree(Body, DC);
@@ -1859,13 +1955,12 @@ public:
     }
 
     bool VisitSwitchStmt(SwitchStmt *SS) {
-        llvm::StringRef VariantName;
+        std::string VariantName;
         const EnumDecl *ED = extractVVariantTagEnum(SS->getCond(), VariantName);
         if (!ED) return true;
 
         llvm::DenseSet<int64_t> HandledValues;
         for (const SwitchCase *SC = SS->getSwitchCaseList(); SC; SC = SC->getNextSwitchCase()) {
-            if (isa<DefaultStmt>(SC)) return true;
             if (const auto *CS = dyn_cast<CaseStmt>(SC)) {
                 Expr::EvalResult Res;
                 if (CS->getLHS() && CS->getLHS()->EvaluateAsInt(Res, *Context)) {

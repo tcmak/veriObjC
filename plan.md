@@ -224,21 +224,21 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Non-allocating `vstring_view` (`vfixed_string_def`) and contiguous `vspan<T>` (`vspan_def`), with plugin root-lifetime propagation and 100% `llvm-cov` coverage.
 - [x] **Task 3.2: Stack Arrays (`<vstd/stack.h>`)**
   - `vstack_array<T>` (`vstack_array_def`) integrated with compiler-assigned data stacks, enforcing single-active-array per data stack at compile time and zero-relocation growth.
-- [ ] **Task 3.3: Inplace Containers (`<vstd/vector.h>`)**
-  - Fixed capacity `vvector<T, N>` with compile-time bounded assertions.
-- [ ] **Task 3.4: Cache-Aligned Maps (`<vstd/map.h>`, `<vstd/hash.h>`)**
-  - `vflat_map` (parallel contiguous binary search) and `vhash_flat` (open addressing).
-- [ ] **Task 3.5: Algebraic Data Types (`<vstd/variant.h>`)**
-  - `vvariant` with exhaustive compile-time checked `match`.
+- [x] **Task 3.3: Inplace Containers (`<vstd/vector.h>`)**
+  - Fixed capacity `vvector<T, N>` (`vvector_def`) with compile-time bounded assertions and `vvector_push_inplace` destination-slot construction.
+- [x] **Task 3.4: Cache-Aligned Maps (`<vstd/map.h>`, `<vstd/hash.h>`)**
+  - `vflat_map` (`vflat_map_def`, parallel contiguous binary search with deterministic key ordering) and `vhash_flat` (`vhash_flat_def`, open addressing with compile-time 75% load-factor ceiling enforcement).
+- [x] **Task 3.5: Algebraic Data Types (`<vstd/variant.h>`)**
+  - `vvariant` (`vvariant_def`) with zero-overhead inline union layout and exhaustive compile-time checked `vmatch`.
 - [x] **Task 3.6: Strong Types (`<vstd/strong.h>`)**
   - `vstrong` newtype wrappers (`vstrong_make`, `vstrong_unwrap`, `vstrong_eq`, `vstrong_lt`) with zero implicit conversions and zero size overhead.
 - [x] **Task 3.7: Branch-Proven Result (`<vstd/result.h>`)**
   - `vresult<T, E>` (`vresult_def`) flat error unions with plugin-enforced `.is_ok` branch checking before `.value` access.
-- [ ] **Task 3.8: Concurrency & Linear Guards (`<vstd/channel.h>`, `<vstd/atomic.h>`)**
-  - Lock-free SPSC flat-value channels and linear `vatomic<T>`.
-- [ ] **Task 3.9: Streaming & Ternary Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
-  - Packed ternary weights {-1, 0, 1} as `Bits(2)` codes, 4 per byte, `consteval` tables pinned in BRAM; weight image verified via `from_bytes` on load.
-  - `ll.ml/model/` blocks: token shift (register-delayed stream), GLU mux gates, RMSNorm with power-of-two scales (shifts only), KV cache as pre-banked BRAM arena with declared `ContextCap` — overflow is a compile error (`test_banned_context_overflow.m`).
+- [x] **Task 3.8: Concurrency & Linear Guards (`<vstd/channel.h>`, `<vstd/atomic.h>`)**
+  - Lock-free SPSC flat-value channels (`vspsc_channel_def`, with plugin single-producer verification) and linear `vatomic<T>` (`vatomic_def` / `vatomic_acquire` with automatic scope-exit release).
+- [x] **Task 3.9: Streaming & Ternary Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
+  - Packed ternary weights {-1, 0, 1} as `Bits(2)` codes (`vternary_pack4` / `vternary_unpack_at`), 4 per byte, verified via `vternary_verify_weights_from_bytes` (`veriobjc_from_bytes`) on load.
+  - `ll.ml/model/` blocks: token shift (`vstream_token_shift_def`, 1-cycle register-delayed stream), GLU mux gates (`vternary_glu_mux_gate`, 0-cycle combinational), RMSNorm with power-of-two shifts (`vternary_rmsnorm_shift`), KV cache as pre-banked BRAM arena (`vstream_kv_arena_def`) with declared `ContextCap` — overflow is a compile error (`test_banned_context_overflow.m`, `test_banned_kv_arena_overflow.m`).
 - [x] **Task 3.10: Freestanding Floor (`sys0/` / `ll.arch/`)**
   - Arch-tuned `sys0_memcpy`/`sys0_memcpy_nt`/`sys0_memset`/`sys0_memcmp` (`<sys0/mem.h>`); per-core boot trampolines and TLS via `GS`/`TPIDR_EL0` (`<sys0/boot.h>`) — no OS interaction.
   - MMU-as-library (`<sys0/mmu.h>`): page tables, huge pages, DMA-coherent regions, and Write-Back vs Write-Combining caching as distinct types; direct `rdtsc`/`CNTVCT_EL0` clock access layers (`<sys0/time.h>`).

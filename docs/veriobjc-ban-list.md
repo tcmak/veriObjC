@@ -47,7 +47,11 @@ Two artifacts, both CI gates:
 | Cyclic static task DAG | — | "Cycle detected in static task DAG" | Acyclic compile-time DAG with proven WCET | `test_banned_dag_cycle.m` ✓ |
 | `vstring_view` / `vspan` escaping backing root scope | Yes | "reference rooted at ... does not outlive the destination" | Keep views within backing buffer scope or copy into `vfixed_string` | `test_banned_view_escapes_root.m` ✓ |
 | Unchecked `vresult<T, E>` `.value` read without `.is_ok` guard | Yes | "Unchecked vresult access" | Branch on `vresult_is_ok(res)` or use `vresult_unwrap_or` | `test_banned_unchecked_vresult.m` ✓ |
-| Multiple concurrent `vstack_array<T>` instances on one data stack | Yes | "Multiple live vstack_array instances on the same data stack" | Separate data stacks or inner `@scoped` lifetime | `test_banned_two_stack_arrays.m` ✓ |
+| Multiple concurrent `vstack_array<T>` instances on one data stack | Yes | "Second live vstack_array" | Separate data stacks or inner `@scoped` lifetime | `test_banned_two_stack_arrays.m` ✓ |
+| Pushing beyond `vvector<T, N>` static capacity | Yes | "vvector push exceeds static capacity" | Size `vvector_def` for the static worst-case bound | `test_banned_vvector_overflow.m` ✓ |
+| Inserting beyond `vhash_flat<K, V, CapPow2>` 75% load ceiling | Yes | "vhash_flat load-factor ceiling exceeded" | Size `vhash_flat_def` power-of-two capacity so load <= 75% | `test_banned_vhash_load_ceiling.m` ✓ |
+| Multiple producers writing to one SPSC channel | Yes | "SPSC invariant violated on channel" | Dedicate one `vspsc_channel_def` per producer-consumer pair | `test_banned_spsc_two_producers.m` ✓ |
+| Direct `vatomic<T>` payload access without `vatomic_acquire` | Yes | "Direct vatomic payload access without linear acquire guard" | Scoped linear guard via `vatomic_acquire` | `test_banned_unacquired_vatomic.m` ✓ |
 
 ### C. Metaprogramming (vmeta)
 
@@ -60,7 +64,7 @@ Two artifacts, both CI gates:
 | `auto` in parameters / public signatures | "Banned inference in signature position" | Concrete types or constrained `vgeneric` | `test_banned_auto_param.m` / `test_banned_auto_export.m` ✓ |
 | `vregex` backreferences / lookaround | "No DFA can exist for this pattern" (with rewrite suggestion) | Regular-language dialect | `test_backref_regex.m` ✓ |
 | Regex state explosion | "Byte budget exceeded (pattern named)" | Manifest table budget | `test_regex_state_explosion.m` ✓ |
-| Non-exhaustive `vmatch` on `vvariant` | "Non-exhaustive vmatch on vvariant" | Exhaustive `vmatch` covering all enum tags | `test_banned_nonexhaustive_match.m` ✓ |
+| Non-exhaustive `vmatch` on `vvariant` (including added enum cases) | "Non-exhaustive vmatch on vvariant" | Exhaustive `vmatch` covering all enum tags | `test_banned_nonexhaustive_match.m` / `test_banned_vvariant_added_case.m` ✓ |
 | Monomorphization budget exceeded | "Monomorphization budget exceeded" | Deduplicated `@mono` within package budget or `@erased` | `test_banned_mono_budget.m` ✓ |
 
 ### D. veriStream
@@ -68,7 +72,7 @@ Two artifacts, both CI gates:
 | Banned construct | Diagnostic | Replacement | Test |
 | :--- | :--- | :--- | :--- |
 | Width-mismatched `zip` | "Stream width mismatch" | Compile-time equal-N check | `test_banned_stream_width_mismatch.m` ✓ |
-| Context exceeding `ContextCap` | "Context cap exceeded — compile error" | Pre-banked BRAM arenas | `test_banned_context_overflow.m` ✓ |
+| Context exceeding `ContextCap` | "Context cap exceeded — compile error" | Pre-banked BRAM arenas (`vstream_kv_arena_def`) | `test_banned_context_overflow.m` / `test_banned_kv_arena_overflow.m` ✓ |
 
 ---
 

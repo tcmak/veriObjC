@@ -59,6 +59,7 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestDispatch.cpp
     tests/unit_rt/TestTapeAndRelPtr.cpp
     tests/unit_rt/TestVstdWave1.cpp
+    tests/unit_rt/TestVstdWave2And3.cpp
 )
 
 target_link_libraries(unit_rt_tests PRIVATE
