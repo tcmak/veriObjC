@@ -3,7 +3,6 @@
 #include "veriobjc_runtime.h"
 #include "vstd/vector.h"
 
-__attribute__((objc_root_class))
 @interface UnsealedLotItem : VVectorItem {
 @public
     int32_t qty;

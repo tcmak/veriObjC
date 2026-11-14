@@ -1046,6 +1046,14 @@ private:
             return It->second;
         }
 
+        DeclContext *TU = Context->getTranslationUnitDecl();
+        for (NamedDecl *ND : TU->lookup(&Context->Idents.get(Mangled))) {
+            if (auto *ExistingFD = dyn_cast<FunctionDecl>(ND)) {
+                DirectMethodDecls[Mangled] = ExistingFD;
+                return ExistingFD;
+            }
+        }
+
         QualType RetTy = MD->getReturnType().getNonReferenceType();
         QualType SelfTy = Context->getObjCObjectPointerType(Context->getObjCInterfaceType(ID));
 
@@ -1053,7 +1061,6 @@ private:
         for (const ParmVarDecl *PVD : MD->parameters()) ParamTypes.push_back(PVD->getType());
 
         QualType FnTy = Context->getFunctionType(RetTy, ParamTypes, FunctionProtoType::ExtProtoInfo());
-        DeclContext *TU = Context->getTranslationUnitDecl();
         FunctionDecl *FD = FunctionDecl::Create(
             *Context, TU, MD->getLocation(), MD->getLocation(),
             &Context->Idents.get(Mangled), FnTy, nullptr, SC_None
@@ -1106,12 +1113,31 @@ private:
         }
 
         llvm::SmallVector<Expr *, 8> CallArgs = {RecvExpr};
-        for (Expr *Arg : E->arguments()) CallArgs.push_back(Arg);
+        unsigned ParamIdx = 1;
+        for (Expr *Arg : E->arguments()) {
+            if (ParamIdx < DirectFD->getNumParams()) {
+                QualType ExpectedParamTy = DirectFD->getParamDecl(ParamIdx)->getType();
+                if (Arg->getType().getCanonicalType() != ExpectedParamTy.getCanonicalType()) {
+                    Arg = ImplicitCastExpr::Create(
+                        *Context, ExpectedParamTy, CK_BitCast, Arg, nullptr, VK_PRValue, FPOptionsOverride()
+                    );
+                }
+            }
+            CallArgs.push_back(Arg);
+            ++ParamIdx;
+        }
 
-        return CallExpr::Create(
+        Expr *Call = CallExpr::Create(
             *Context, buildFnPtrDecay(DirectFD, E->getExprLoc()), CallArgs,
             DirectFD->getReturnType(), VK_PRValue, E->getRightLoc(), FPOptionsOverride()
         );
+        if (!E->getType()->isVoidType() &&
+            DirectFD->getReturnType().getCanonicalType() != E->getType().getCanonicalType()) {
+            Call = ImplicitCastExpr::Create(
+                *Context, E->getType(), CK_BitCast, Call, nullptr, VK_PRValue, FPOptionsOverride()
+            );
+        }
+        return Call;
     }
 
     ObjCIvarDecl *findBoundedArrayIvar(Expr *Coll, VarDecl *ElemVD, const ConstantArrayType *&OutCAT) {
@@ -1121,7 +1147,18 @@ private:
         for (const ObjCInterfaceDecl *CurID = ID; CurID; CurID = CurID->getSuperClass()) {
             for (ObjCIvarDecl *Ivar : CurID->ivars()) {
                 const ConstantArrayType *CandCAT = Context->getAsConstantArrayType(Ivar->getType());
-                if (CandCAT && CandCAT->getElementType().getCanonicalType() == ElemVD->getType().getCanonicalType()) {
+                if (!CandCAT) continue;
+                QualType CandElemTy = CandCAT->getElementType();
+                QualType LoopElemTy = ElemVD->getType();
+                bool Matches = (CandElemTy.getCanonicalType() == LoopElemTy.getCanonicalType());
+                if (!Matches) {
+                    const auto *CandOPT = CandElemTy->getAs<ObjCObjectPointerType>();
+                    const auto *LoopOPT = LoopElemTy->getAs<ObjCObjectPointerType>();
+                    if (CandOPT && LoopOPT && Context->canAssignObjCInterfaces(CandOPT, LoopOPT)) {
+                        Matches = true;
+                    }
+                }
+                if (Matches) {
                     OutCAT = CandCAT;
                     return Ivar;
                 }
@@ -1176,9 +1213,15 @@ private:
         UnaryOperator *DerefExpr = UnaryOperator::Create(
             *Context, buildRValueRef(IterVD, Loc), UO_Deref, ElemTy, VK_LValue, OK_Ordinary, Loc, false, FPOptionsOverride()
         );
-        ElemVD->setInit(ImplicitCastExpr::Create(
+        Expr *ElemInit = ImplicitCastExpr::Create(
             *Context, ElemTy, CK_LValueToRValue, DerefExpr, nullptr, VK_PRValue, FPOptionsOverride()
-        ));
+        );
+        if (ElemTy.getCanonicalType() != ElemVD->getType().getCanonicalType()) {
+            ElemInit = ImplicitCastExpr::Create(
+                *Context, ElemVD->getType(), CK_BitCast, ElemInit, nullptr, VK_PRValue, FPOptionsOverride()
+            );
+        }
+        ElemVD->setInit(ElemInit);
 
         Stmt *BodyStmts[2] = { OFS->getElement(), OFS->getBody() };
         CompoundStmt *NewBody = CompoundStmt::Create(*Context, BodyStmts, FPOptionsOverride(), Loc, OFS->getEndLoc());
@@ -1460,6 +1503,16 @@ private:
             ID->getName() == "NSSet" || (!isSealedClass(ID) && !isFinalClass(ID))) {
             reportError(Loc, "VeriObjC Violation: Banned erased generic hints: lightweight generic specialization on '%0' is type-erased; use constrained vgeneric.")
                 << ID->getName();
+            return;
+        }
+
+        for (QualType ArgTy : OPT->getTypeArgsAsWritten()) {
+            const auto *ArgOPT = ArgTy->getAs<ObjCObjectPointerType>();
+            const ObjCInterfaceDecl *ArgID = ArgOPT ? ArgOPT->getInterfaceDecl() : nullptr;
+            if (ArgID && !isSealedClass(ArgID) && !isFinalClass(ArgID)) {
+                reportError(Loc, "VeriObjC Violation: Invalid vgeneric type argument '%0': type arguments to constrained generics must be @sealed classes.")
+                    << ArgID->getName();
+            }
         }
     }
 
@@ -1647,9 +1700,9 @@ private:
         llvm::errs() << ");\n";
     }
 
-    static bool extractAnnotatedCapacity(const RecordDecl *RD, llvm::StringRef Prefix, uint32_t &OutCap) {
-        if (!RD) return false;
-        for (const auto *A : RD->specific_attrs<AnnotateAttr>()) {
+    static bool extractAnnotatedCapacity(const Decl *D, llvm::StringRef Prefix, uint32_t &OutCap) {
+        if (!D) return false;
+        for (const auto *A : D->specific_attrs<AnnotateAttr>()) {
             llvm::StringRef Ann = A->getAnnotation();
             if (Ann.starts_with(Prefix)) {
                 unsigned Val = 0;
@@ -1808,6 +1861,22 @@ private:
             }
         }
 
+        if (const auto *OME = dyn_cast<ObjCMessageExpr>(S)) {
+            if (OME->isInstanceMessage() && OME->getSelector().getAsString() == "push:") {
+                if (const VarDecl *VecVD = extractVarDecl(OME->getInstanceReceiver())) {
+                    const ObjCInterfaceDecl *ID = OME->getReceiverInterface();
+                    uint32_t Cap = 0;
+                    if (extractAnnotatedCapacity(ID, "objc_vvector:", Cap)) {
+                        uint32_t Count = ++VVectorPushCounts[VecVD];
+                        if (Count > Cap) {
+                            reportError(OME->getExprLoc(), "VeriObjC Violation: vvector push exceeds static capacity %0 on '%1'.")
+                                << Cap << VecVD->getName();
+                        }
+                    }
+                }
+            }
+        }
+
         if (const auto *CE = dyn_cast<CallExpr>(S)) {
             const FunctionDecl *CalleeFD = CE->getDirectCallee();
             if (CalleeFD) {
@@ -1828,7 +1897,7 @@ private:
                             ActiveStackArray[StackVD] = ArrVD;
                         }
                     }
-                } else if ((CalleeName == "__vvector_push_raw" || CalleeName == "__vvector_alloc_slot_raw") && CE->getNumArgs() >= 1) {
+                } else if (CalleeName == "__vvector_alloc_slot_raw" && CE->getNumArgs() >= 1) {
                     if (const VarDecl *VecVD = extractVarDecl(CE->getArg(0))) {
                         const auto *RT = VecVD->getType()->getAs<RecordType>();
                         const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;

@@ -3,8 +3,7 @@
 #include "vstd/vector.h"
 
 // Missing __attribute__((objc_sealed)) on subclass passed to VVector<T>
-__attribute__((objc_root_class))
-@interface UnsealedLotItem {
+@interface UnsealedLotItem : VVectorItem {
 @public
     int32_t qty;
 }

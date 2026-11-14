@@ -6,14 +6,17 @@ extern "C" {
 #endif
 
 // ---------------------------------------------------------------------------
-// <vstd/vector.h> — Fixed-Capacity Inplace Containers (vvector<T, N>)
+// <vstd/vector.h> — Fixed-Capacity Inplace Containers (VVector<T> & vvector_def)
 // Layer: vstd (depends on: rt)
 //
 // Invariants:
-//   1. Elements live inline inside the struct footprint (zero heap allocation).
-//   2. Pushing beyond Cap is rejected at compile time by VeriObjCPlugin and
-//      returns false at runtime.
-//   3. vvector_push_inplace constructs elements directly in the target slot.
+//   1. Elements live inline inside the container footprint (zero heap allocation).
+//   2. Pushing beyond capacity is rejected at compile time by VeriObjCPlugin
+//      and returns false at runtime.
+//   3. Both vvector_push and vvector_push_inplace construct elements directly
+//      in the destination slot without compound-literal temporaries or memcpy.
+//   4. In Objective-C mode, VVector<T : VVectorItem *> provides a definition-site
+//      checked vgeneric container with covariant devirtualization and range-for.
 // ---------------------------------------------------------------------------
 
 #define vvector_def(VecName, ElemType, Cap) \
@@ -29,26 +32,6 @@ static inline void __vvector_init_raw(void *vec_obj, uint32_t *count_ptr, uint32
     }
     *count_ptr = 0u;
     *cap_ptr = cap_val;
-}
-
-static inline bool __vvector_push_raw(
-    void *vec_obj,
-    uint32_t *count_ptr,
-    uint32_t cap_val,
-    void *buf_ptr,
-    size_t elem_size,
-    const void *val_ptr
-) {
-    if (!vec_obj || *count_ptr >= cap_val) {
-        return false;
-    }
-    uint8_t *dst = (uint8_t *)buf_ptr + (size_t)(*count_ptr) * elem_size;
-    const uint8_t *src = (const uint8_t *)val_ptr;
-    for (size_t i = 0u; i < elem_size; ++i) {
-        dst[i] = src[i];
-    }
-    (*count_ptr)++;
-    return true;
 }
 
 static inline void *__vvector_alloc_slot_raw(
@@ -86,12 +69,6 @@ static inline uint32_t __vvector_u32_or_zero(const void *vec_obj, const uint32_t
     return *field_ptr;
 }
 
-#ifdef __cplusplus
-#define __vvector_val_ptr(ElemType, val) (&static_cast<const ElemType &>(val))
-#else
-#define __vvector_val_ptr(ElemType, val) ((const void *)(const ElemType[1]){ (val) })
-#endif
-
 #define vvector_init(vec_ptr) \
     __vvector_init_raw( \
         (vec_ptr), \
@@ -100,13 +77,14 @@ static inline uint32_t __vvector_u32_or_zero(const void *vec_obj, const uint32_t
         (uint32_t)(sizeof((vec_ptr)->buf) / sizeof((vec_ptr)->buf[0])))
 
 #define vvector_push(vec_ptr, val) \
-    __vvector_push_raw( \
+    ((__vvector_alloc_slot_raw( \
         (vec_ptr), \
         (vec_ptr) ? &(vec_ptr)->count : (uint32_t *)NULL, \
         (vec_ptr) ? (vec_ptr)->cap : 0u, \
         (vec_ptr) ? (void *)(vec_ptr)->buf : NULL, \
-        sizeof((vec_ptr)->buf[0]), \
-        __vvector_val_ptr(__typeof__((vec_ptr)->buf[0]), (val)))
+        sizeof((vec_ptr)->buf[0])) != NULL) \
+        ? ((vec_ptr)->buf[(vec_ptr)->count - 1u] = (val), true) \
+        : false)
 
 #define vvector_push_inplace(vec_ptr, builder_fn, arg_val) \
     ((__vvector_alloc_slot_raw( \
@@ -133,5 +111,67 @@ static inline uint32_t __vvector_u32_or_zero(const void *vec_obj, const uint32_t
     __vvector_u32_or_zero((vec_ptr), (vec_ptr) ? &(vec_ptr)->cap : (const uint32_t *)NULL)
 
 #ifdef __cplusplus
+}
+#endif
+
+#ifdef __OBJC__
+#define VVECTOR_GENERIC_CAPACITY 4u
+
+__attribute__((objc_root_class))
+__attribute__((annotate("objc_sealed")))
+@interface VVectorItem {
+@public
+    uint32_t item_tag;
+}
+@end
+
+__attribute__((objc_root_class))
+__attribute__((annotate("objc_sealed")))
+__attribute__((annotate("objc_final")))
+__attribute__((annotate("objc_vvector:4")))
+@interface VVector<T : VVectorItem *> {
+@public
+    uint32_t count;
+    uint32_t cap;
+    T buf[VVECTOR_GENERIC_CAPACITY];
+}
+- (void)initVec;
+- (bool)push:(T)item;
+- (T)at:(uint32_t)idx;
+- (uint32_t)len;
+- (uint32_t)cap;
+@end
+
+static inline void __veriobjc_direct_VVector__initVec(VVector *self) {
+    if (!self) return;
+    self->count = 0u;
+    self->cap = VVECTOR_GENERIC_CAPACITY;
+    for (uint32_t i = 0u; i < VVECTOR_GENERIC_CAPACITY; ++i) {
+        self->buf[i] = (VVectorItem *)0;
+    }
+}
+
+static inline bool __veriobjc_direct_VVector__push_(VVector *self, VVectorItem *item) {
+    if (!self || self->count >= VVECTOR_GENERIC_CAPACITY) {
+        return false;
+    }
+    self->buf[self->count] = item;
+    self->count++;
+    return true;
+}
+
+static inline VVectorItem *__veriobjc_direct_VVector__at_(VVector *self, uint32_t idx) {
+    if (!self || idx >= self->count) {
+        return (VVectorItem *)0;
+    }
+    return self->buf[idx];
+}
+
+static inline uint32_t __veriobjc_direct_VVector__len(VVector *self) {
+    return self ? self->count : 0u;
+}
+
+static inline uint32_t __veriobjc_direct_VVector__cap(VVector *self) {
+    return self ? self->cap : 0u;
 }
 #endif
