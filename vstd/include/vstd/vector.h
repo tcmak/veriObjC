@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 // ---------------------------------------------------------------------------
-// <vstd/vector.h> — Fixed-Capacity Inplace Containers (VVector<T> & vvector_def)
+// <vstd/vector.h> — Fixed-Capacity Inplace Containers (VVector<T>)
 // Layer: vstd (depends on: rt)
 //
 // Invariants:
@@ -17,9 +17,15 @@ extern "C" {
 //      in the destination slot without compound-literal temporaries or memcpy.
 //   4. In Objective-C mode, VVector<T : VVectorItem *> provides a definition-site
 //      checked vgeneric container with covariant devirtualization and range-for.
+//
+// INTERNAL BRIDGE (DEPRECATED — NO NEW PUBLIC DEPENDENTS):
+//   __vvector_storage_def is the internal C/value-type bridge pending Task 3.3c's
+//   plugin lowering for value-parameter generics (VG-005: vvector<T, N>) and
+//   flat @interface return-by-value lowering (VG-006). Once Task 3.3c lands,
+//   __vvector_storage_def will be deleted in favor of a single unified container.
 // ---------------------------------------------------------------------------
 
-#define vvector_def(VecName, ElemType, Cap) \
+#define __vvector_storage_def(VecName, ElemType, Cap) \
     typedef struct __attribute__((annotate("objc_vvector:" #Cap), annotate("objc_flat"))) { \
         uint32_t count; \
         uint32_t cap; \

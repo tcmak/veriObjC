@@ -670,7 +670,7 @@ static inline struct veriobjc_object *veriobjc_alloc_init(Class cls, struct veri
     struct veriobjc_object *obj =
         (struct veriobjc_object *)veriobjc_stack_alloc(s, alloc_size);
     if (obj) {
-        obj->isa = cls;
+        obj->isa = (const struct veriobjc_class *)cls;
     }
     return obj;
 }

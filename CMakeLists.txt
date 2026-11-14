@@ -63,6 +63,15 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestVstdWave4And5.cpp
 )
 
+# Compile all vstd unit tests as Objective-C++ so the #ifdef __OBJC__ halves of
+# all <vstd/*.h> headers are exercised and measured by llvm-cov.
+set_source_files_properties(
+    tests/unit_rt/TestVstdWave1.cpp
+    tests/unit_rt/TestVstdWave2And3.cpp
+    tests/unit_rt/TestVstdWave4And5.cpp
+    PROPERTIES COMPILE_OPTIONS "-x;objective-c++;-fno-exceptions"
+)
+
 target_link_libraries(unit_rt_tests PRIVATE
     veriobjc_rt
     veriobjc_vstd

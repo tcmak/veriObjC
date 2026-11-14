@@ -21,17 +21,19 @@ verify_header_passes() {
 
     local rel_hdr="${hdr_path#"$REPO_ROOT"/}"
     local trace_out
-    if ! trace_out=$(clang-23 -std=gnu23 -Wall -Wextra -Werror -H -fsyntax-only "${include_flags[@]}" -x c-header "$hdr_path" 2>&1); then
-        echo "[FAIL] Header $rel_hdr failed standalone compilation under layer '$layer_name' include roots!"
-        echo "$trace_out"
-        return 1
-    fi
+    for lang_mode in c-header objective-c-header; do
+        if ! trace_out=$(clang-23 -std=gnu23 -Wall -Wextra -Werror -H -fsyntax-only "${include_flags[@]}" -x "$lang_mode" "$hdr_path" 2>&1); then
+            echo "[FAIL] Header $rel_hdr failed standalone compilation (-x $lang_mode) under layer '$layer_name' include roots!"
+            echo "$trace_out"
+            return 1
+        fi
 
-    if [ -n "$forbidden_regex" ] && echo "$trace_out" | grep -E "^\.+ " | grep -qE "$forbidden_regex"; then
-        echo "[FAIL] Layer violation in $rel_hdr (layer '$layer_name' imported forbidden dependency matching '$forbidden_regex')!"
-        echo "$trace_out" | grep -E "^\.+ "
-        return 1
-    fi
+        if [ -n "$forbidden_regex" ] && echo "$trace_out" | grep -E "^\.+ " | grep -qE "$forbidden_regex"; then
+            echo "[FAIL] Layer violation in $rel_hdr (-x $lang_mode, layer '$layer_name' imported forbidden dependency matching '$forbidden_regex')!"
+            echo "$trace_out" | grep -E "^\.+ "
+            return 1
+        fi
+    done
     return 0
 }
 

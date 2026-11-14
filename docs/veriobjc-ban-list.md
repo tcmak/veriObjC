@@ -48,7 +48,7 @@ Two artifacts, both CI gates:
 | `vstring_view` / `vspan` escaping backing root scope | Yes | "reference rooted at ... does not outlive the destination" | Keep views within backing buffer scope or copy into `vfixed_string` | `test_banned_view_escapes_root.m` ✓ |
 | Unchecked `vresult<T, E>` `.value` read without `.is_ok` guard | Yes | "Unchecked vresult access" | Branch on `vresult_is_ok(res)` or use `vresult_unwrap_or` | `test_banned_unchecked_vresult.m` ✓ |
 | Multiple concurrent `vstack_array<T>` instances on one data stack | Yes | "Second live vstack_array" | Separate data stacks or inner `@scoped` lifetime | `test_banned_two_stack_arrays.m` ✓ |
-| Pushing beyond `vvector<T, N>` static capacity | Yes | "vvector push exceeds static capacity" | Size `vvector_def` for the static worst-case bound | `test_banned_vvector_overflow.m` ✓ |
+| Pushing beyond `vvector<T, N>` static capacity | Yes | "vvector push exceeds static capacity" | Size `VVector<T>` (`__vvector_storage_def` internal bridge) for the static worst-case bound | `test_banned_vvector_overflow.m` ✓ |
 | Inserting beyond `vhash_flat<K, V, CapPow2>` 75% load ceiling | Yes | "vhash_flat load-factor ceiling exceeded" | Size `vhash_flat_def` power-of-two capacity so load <= 75% | `test_banned_vhash_load_ceiling.m` ✓ |
 | Multiple producers writing to one SPSC channel | Yes | "SPSC invariant violated on channel" | Dedicate one `vspsc_channel_def` per producer-consumer pair | `test_banned_spsc_two_producers.m` ✓ |
 | Direct `vatomic<T>` payload access without `vatomic_acquire` | Yes | "Direct vatomic payload access without linear acquire guard" | Scoped linear guard via `vatomic_acquire` | `test_banned_unacquired_vatomic.m` ✓ |
