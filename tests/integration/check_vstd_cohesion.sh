@@ -132,7 +132,7 @@ echo "[PASS] examples/hello_world.m verified (0 vstd imports, linked against rt/
 
 has_non_io_vstd_include() {
     local trace_text="$1"
-    echo "$trace_text" | grep -E "^\.+ " | grep -qE "vstd/(vector|map|hash|variant|channel|atomic|stream|ternary|simd|contracts|execution|stack|string|span|strong|result)\.h"
+    echo "$trace_text" | grep -E "^\.+ " | grep -E "vstd/" | grep -vqE "vstd/include/vstd/io\.h$"
 }
 
 # 8. Task 3.15 Bare-Metal Minimal-Binary Proof: examples/hello_uart.m (io.h + sys0/boot.h + hw/loopback.h closure only)
