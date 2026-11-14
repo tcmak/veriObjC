@@ -130,18 +130,31 @@ fi
 HW_BYTES=$(stat -c%s "$TMP_HW_BIN")
 echo "[PASS] examples/hello_world.m verified (0 vstd imports, linked against rt/ alone, binary size: ${HW_BYTES} bytes)."
 
+has_non_io_vstd_include() {
+    local trace_text="$1"
+    echo "$trace_text" | grep -E "^\.+ " | grep -qE "vstd/(vector|map|hash|variant|channel|atomic|stream|ternary|simd|contracts|execution|stack|string|span|strong|result)\.h"
+}
+
 # 8. Task 3.15 Bare-Metal Minimal-Binary Proof: examples/hello_uart.m (io.h + sys0/boot.h + hw/loopback.h closure only)
 UART_TRACE=$(clang-23 -std=gnu23 -O2 -ffunction-sections -fdata-sections -Wl,--gc-sections \
                       -DVERIOBJC_EXAMPLE_MAIN -H \
                       -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" -I"$REPO_ROOT/hw/include" \
                       "$REPO_ROOT/examples/hello_uart.m" -o "$TMP_UART_BIN" 2>&1)
-if echo "$UART_TRACE" | grep -E "^\.+ " | grep -qE "vstd/(vector|map|hash|variant|channel|atomic|stream|ternary|simd|contracts|execution|stack|string|span|strong|result)\.h"; then
+if has_non_io_vstd_include "$UART_TRACE"; then
     echo "[FAIL] examples/hello_uart.m leaked non-IO vstd headers into its closure!"
     echo "$UART_TRACE"
     exit 1
 fi
 UART_BYTES=$(stat -c%s "$TMP_UART_BIN")
 echo "[PASS] examples/hello_uart.m verified (<vstd/io.h> + <sys0/boot.h> + <hw/loopback.h> closure only, binary size: ${UART_BYTES} bytes)."
+
+# 9. Negative Self-Test (F4): Verify hello_uart check is deny-by-default for any unlisted <vstd/*.h> header
+SYNTHETIC_UART_TRACE=$'. vstd/include/vstd/io.h\n.. vstd/include/vstd/future_unlisted.h'
+if ! has_non_io_vstd_include "$SYNTHETIC_UART_TRACE"; then
+    echo "[FAIL] Negative self-test failed: unlisted <vstd/future_unlisted.h> escaped hello_uart check!"
+    exit 1
+fi
+echo "[PASS] Negative self-test verified: hello_uart check rejects unlisted <vstd/*.h> headers (deny-by-default)."
 
 echo "=== All Phase 3 Header Cohesion & Minimal-Binary Gate Checks Passed! ==="
 exit 0
