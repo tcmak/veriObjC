@@ -225,7 +225,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 3.2: Stack Arrays (`<vstd/stack.h>`)**
   - `vstack_array<T>` (`vstack_array_def`) integrated with compiler-assigned data stacks, enforcing single-active-array per data stack at compile time and zero-relocation growth.
 - [x] **Task 3.3: Inplace Containers (`<vstd/vector.h>`)**
-  - Fixed capacity `vvector<T, N>` (`vvector_def`) with compile-time bounded assertions and `vvector_push_inplace` destination-slot construction.
+  - Fixed capacity `vvector<T, N>` (`vvector_def`) with compile-time bounded assertions, direct slot assignment in `vvector_push` (zero compound-literal temporary), and `vvector_push_inplace` destination-slot construction.
+  - **Task 3.3b (`vgeneric` `VVector<T>` & Compiler Friction Fixes):** Implemented constrained `vgeneric` Objective-C container `@interface VVector<T : VVectorItem *>` (`initVec`, `push:`, `at:`, `len`, `cap`, and `for (T item in vec)` range-for iteration), filed and resolved compiler frictions `VG-001` through `VG-004` in `docs/veriobjc-vgeneric-frictions.md`, added ban-corpus enforcement for unsealed type arguments (`test_banned_vvector_unsealed_arg.m`, `valid_objc_vvector_unsealed_arg.m`), and verified return-by-value zero-overhead lowering via disassembly (`build_vector_by_value`, `build_stack_array_by_value`).
 - [x] **Task 3.4: Cache-Aligned Maps (`<vstd/map.h>`, `<vstd/hash.h>`)**
   - `vflat_map` (`vflat_map_def`, parallel contiguous binary search with deterministic key ordering) and `vhash_flat` (`vhash_flat_def`, open addressing with compile-time 75% load-factor ceiling enforcement).
 - [x] **Task 3.5: Algebraic Data Types (`<vstd/variant.h>`)**

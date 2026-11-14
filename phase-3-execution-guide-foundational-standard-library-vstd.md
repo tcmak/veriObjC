@@ -175,6 +175,18 @@ rt/include/veriobjc_runtime.h   # minimal micro-runtime floor (existing)
 
 ---
 
+## 🔧 Phase 3 Review Fix List (block Phase 4 until green)
+
+Findings from the GitHub review of commits `36e98f2`–`9520184`. Work through in order; Phase 4's "no number, no claim" gate must not start on top of these.
+
+- [x] **F1 — Task 3.3 `vgeneric` decision (substantive).** `vvector` shipped as C macros + `void*` raw helpers with runtime `elem_size`, not `vgeneric`: the language was never exercised, so the predicted compiler friction never fired and was never filed. The "growable array returned by value costs nothing" red test is inexpressible in this design. **Decision needed:** either reopen as **Task 3.3b** (reimplement `vvector` over `vgeneric`, file every friction as a language bug) or record an explicit accepted tradeoff in plan.md. Recommendation: do 3.3b — exercising the language is the point of the phase. Sub-check either way: `vvector_push` in C mode materializes a compound-literal temporary before the copy, brushing Task 2.8.7's built-in-place invariant — verify with disassembly. *(Resolved in Task 3.3b: filed `VG-001..VG-004` in `docs/veriobjc-vgeneric-frictions.md`, implemented `@interface VVector<T : VVectorItem *>` in `<vstd/vector.h>`, fixed `VeriObjCPlugin.cpp` devirtualization/range-for/capacity/sealed-arg checks, removed the compound-literal temporary in `vvector_push`, and verified return-by-value disassembly).*
+- [x] **F2 — Restore truncated plan.md.** Repo plan.md ends mid-sentence in Task 5.5's acceptance criteria ("every message thro…"); Phase 6 header + Tasks 6.1/6.2 are missing entirely. Restore from the full version and verify `Task 6.1` appears. *(Resolved: full `plan.md` through Task 6.3 verified with `Task 6.1` present and Task 3.3b recorded).*
+- [ ] **F3 — Local audit trifecta on Waves 2–3** (not verifiable from GitHub): (a) mutation spot-check — disable one plugin pass (e.g. root-depth tracking), confirm its negative tests fail, restore; (b) `nm` zero-libc/malloc audit on the Wave 2–3 objects, especially map/hash rehash paths; (c) disassembly audit of `vvector_push`/`vvector_push_inplace` for the no-intermediate-copy claim.
+- [ ] **F4 — Harden the cohesion gate's hello_uart check.** It enumerates allowed-against `vstd` headers in a regex; a future header silently escapes. Switch to deny-by-default: any `vstd/` import except `io.h` fails.
+- [ ] **F5 — Process going forward.** Waves landed as two giant commits, so red-first ordering isn't auditable in history. From Phase 4 on: one commit per task, failing test visible before its implementation; file a short review-gate artifact at each wave boundary.
+
+---
+
 ## 🎯 Where to Start (this week)
 
 1. **Task 3.1, red test one:** `vstring_view` over a fixed buffer — construct, read, bounds-check, scope-exit. Then the composition test: view escaping its root scope must trip Task 2.4.2's diagnostic. That single red test exercises the newest plugin machinery against the oldest runtime invariant — exactly the kind of seam Phase 3 exists to stress.
