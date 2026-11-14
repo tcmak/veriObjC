@@ -18,7 +18,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
     echo "[RUN] Ban Corpus File: $base_name"
 
     # Direction 1: Must compile 100% cleanly under stock Clang 23 (-Werror)
-    STOCK_OUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions -Werror -fsyntax-only "$corpus_file" 2>&1) || {
+    STOCK_OUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions -Werror \
+                         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" \
+                         -fsyntax-only "$corpus_file" 2>&1) || {
         echo "[FAIL] Corpus file $base_name did NOT compile cleanly under stock Clang 23 (-Werror)!"
         echo "$STOCK_OUT"
         exit 1
@@ -78,6 +80,15 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_shared_nolatency.m)
             EXPECTED_DIAG="@shared retain permitted only in @cold"
             ;;
+        valid_objc_view_escapes_root.m)
+            EXPECTED_DIAG="Escaping data-stack reference"
+            ;;
+        valid_objc_unchecked_vresult.m)
+            EXPECTED_DIAG="Unchecked vresult access"
+            ;;
+        valid_objc_two_stack_arrays.m)
+            EXPECTED_DIAG="Second live vstack_array"
+            ;;
         *)
             echo "[FAIL] Unmapped corpus file $base_name in Ban Registry!"
             exit 1
@@ -89,6 +100,8 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
                              -Xclang -load -Xclang "$PLUGIN_PATH" \
                              -Xclang -add-plugin -Xclang veriobjc-check \
                              -I"$REPO_ROOT/rt/include" \
+                             -I"$REPO_ROOT/vstd/include" \
+                             -I"$REPO_ROOT/sys0/include" \
                              -fsyntax-only "$corpus_file" 2>&1); then
         echo "[FAIL] Corpus file $base_name unexpectedly SUCCEEDED under VeriObjC plugin!"
         exit 1

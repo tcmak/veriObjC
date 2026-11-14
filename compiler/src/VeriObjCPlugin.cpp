@@ -247,7 +247,11 @@ private:
     }
 
     bool isInRuntimeHeader(SourceLocation Loc) const {
-        return Context->getSourceManager().getFilename(Loc).ends_with("veriobjc_runtime.h");
+        llvm::StringRef File = Context->getSourceManager().getFilename(Loc);
+        return File.ends_with("veriobjc_runtime.h") ||
+               File.contains("/vstd/include/") ||
+               File.contains("/sys0/include/") ||
+               File.contains("/hw/include/");
     }
 
     DeclRefExpr *buildDeclRef(ValueDecl *VD, SourceLocation Loc) {
@@ -910,6 +914,14 @@ private:
             } else if (const VarDecl *SrcVD = extractVarDecl(Init)) {
                 if (auto It = StackRootDepth.find(SrcVD); It != StackRootDepth.end()) {
                     StackRootDepth[VD] = It->second;
+                }
+            } else if (const auto *CE = dyn_cast<CallExpr>(Init->IgnoreParenCasts())) {
+                if (CE->getNumArgs() >= 1) {
+                    if (const VarDecl *ArgVD = extractVarDecl(CE->getArg(0))) {
+                        if (auto It = StackRootDepth.find(ArgVD); It != StackRootDepth.end()) {
+                            StackRootDepth[VD] = It->second;
+                        }
+                    }
                 }
             }
         }
@@ -1684,6 +1696,70 @@ private:
         DAGEdges.push_back({FromSL->getString().str(), ToSL->getString().str(), static_cast<uint32_t>(WCET), E->getExprLoc()});
     }
 
+    static const VarDecl *extractVResultIsOkVar(const Expr *Cond) {
+        if (!Cond) return nullptr;
+        Cond = Cond->IgnoreParenImpCasts();
+        if (const auto *ME = dyn_cast<MemberExpr>(Cond)) {
+            if (ME->getMemberDecl()->getName() == "is_ok") {
+                return extractVarDecl(ME->getBase());
+            }
+        }
+        return nullptr;
+    }
+
+    void analyzeVResultAndStackArrays(
+        const Stmt *S,
+        llvm::DenseSet<const VarDecl *> &ProvenOkVars,
+        llvm::DenseMap<const VarDecl *, const VarDecl *> &ActiveStackArray
+    ) {
+        if (!S) return;
+
+        if (const auto *IS = dyn_cast<IfStmt>(S)) {
+            analyzeVResultAndStackArrays(IS->getCond(), ProvenOkVars, ActiveStackArray);
+            const VarDecl *ProvenVD = extractVResultIsOkVar(IS->getCond());
+            if (ProvenVD) ProvenOkVars.insert(ProvenVD);
+            analyzeVResultAndStackArrays(IS->getThen(), ProvenOkVars, ActiveStackArray);
+            if (ProvenVD) ProvenOkVars.erase(ProvenVD);
+            if (IS->getElse()) analyzeVResultAndStackArrays(IS->getElse(), ProvenOkVars, ActiveStackArray);
+            return;
+        }
+
+        if (const auto *ME = dyn_cast<MemberExpr>(S)) {
+            if (ME->getMemberDecl()->getName() == "value") {
+                const auto *RT = ME->getBase()->IgnoreParenImpCasts()->getType()->getAs<RecordType>();
+                const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
+                if (RD && hasVeriObjCAnnotation(RD, "objc_vresult")) {
+                    const VarDecl *BaseVD = extractVarDecl(ME->getBase());
+                    if (!BaseVD || !ProvenOkVars.contains(BaseVD)) {
+                        reportError(ME->getMemberLoc(), "VeriObjC Violation: Unchecked vresult access on '%0': '.value' may only be accessed after proving '.is_ok' in an enclosing branch.")
+                            << (BaseVD ? BaseVD->getName() : "vresult");
+                    }
+                }
+            }
+        }
+
+        if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            const FunctionDecl *CalleeFD = CE->getDirectCallee();
+            if (CalleeFD && CalleeFD->getName() == "__vstack_array_init_raw" && CE->getNumArgs() >= 5) {
+                const VarDecl *ArrVD = extractVarDecl(CE->getArg(0));
+                const VarDecl *StackVD = extractVarDecl(CE->getArg(4));
+                if (ArrVD && StackVD) {
+                    auto It = ActiveStackArray.find(StackVD);
+                    if (It != ActiveStackArray.end() && It->second != ArrVD) {
+                        reportError(CE->getExprLoc(), "VeriObjC Violation: Second live vstack_array '%0' on data stack '%1' while '%2' is already active on top of the same stack.")
+                            << ArrVD->getName() << StackVD->getName() << It->second->getName();
+                    } else {
+                        ActiveStackArray[StackVD] = ArrVD;
+                    }
+                }
+            }
+        }
+
+        for (const Stmt *Child : S->children()) {
+            analyzeVResultAndStackArrays(Child, ProvenOkVars, ActiveStackArray);
+        }
+    }
+
     bool analyzeAndRewriteBody(Stmt *Body, DeclContext *DC) {
         llvm::DenseSet<const VarDecl *> MovedVars;
         llvm::DenseSet<const VarDecl *> FreedVars;
@@ -1692,6 +1768,10 @@ private:
         llvm::DenseMap<const VarDecl *, unsigned> VarDeclDepth;
         llvm::DenseMap<const VarDecl *, unsigned> StackRootDepth;
         analyzeScopeRootSafety(Body, 0, VarDeclDepth, StackRootDepth);
+
+        llvm::DenseSet<const VarDecl *> ProvenOkVars;
+        llvm::DenseMap<const VarDecl *, const VarDecl *> ActiveStackArray;
+        analyzeVResultAndStackArrays(Body, ProvenOkVars, ActiveStackArray);
         if (Context->getDiagnostics().hasErrorOccurred()) return false;
 
         rewriteStmtTree(Body, DC);
@@ -1844,7 +1924,8 @@ public:
     }
 
     bool VisitStmtExpr(StmtExpr *E) {
-        if (!Context->getSourceManager().isInSystemHeader(E->getBeginLoc())) {
+        if (!Context->getSourceManager().isInSystemHeader(E->getBeginLoc()) &&
+            !isInRuntimeHeader(E->getBeginLoc())) {
             reportError(E->getBeginLoc(), "VeriObjC Violation: Banned computation macro: preprocessor statement-expression codegen is forbidden; use vconstexpr.");
         }
         return true;

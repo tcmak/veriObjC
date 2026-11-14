@@ -32,6 +32,8 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
              -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
+             -I"$REPO_ROOT/vstd/include" \
+             -I"$REPO_ROOT/sys0/include" \
              -c "$pos_file" \
              -o "$TMP_OBJ"
     if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
@@ -200,12 +202,20 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Cycle detected in static task DAG"
     elif [[ "$base_name" == test_banned_temp_copy_inplace* ]]; then
         EXPECTED_MSG="Intermediate copy of built-in-place type"
+    elif [[ "$base_name" == test_banned_view_escapes_root* ]]; then
+        EXPECTED_MSG="Escaping data-stack reference"
+    elif [[ "$base_name" == test_banned_unchecked_vresult* ]]; then
+        EXPECTED_MSG="Unchecked vresult access"
+    elif [[ "$base_name" == test_banned_two_stack_arrays* ]]; then
+        EXPECTED_MSG="Second live vstack_array"
     fi
 
     OUTPUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions \
                       -Xclang -load -Xclang "$PLUGIN_PATH" \
                       -Xclang -add-plugin -Xclang veriobjc-check \
                       -I"$REPO_ROOT/rt/include" \
+                      -I"$REPO_ROOT/vstd/include" \
+                      -I"$REPO_ROOT/sys0/include" \
                       -c "$test_file" \
                       -o /dev/null 2>&1 || true)
 

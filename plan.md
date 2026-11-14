@@ -220,28 +220,28 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ## 📚 Phase 3: Foundational Standard Library (`vstd/`)
 *(Mapped to: `docs/veriobjc-foundational-library.md`)*
 
-- [ ] **Task 3.1: Text & Slices (`<vstd/string.h>`, `<vstd/span.h>`)**
-  - Non-allocating `vstring_view` and contiguous `vspan<T>`.
-- [ ] **Task 3.2: Stack Arrays (`<vstd/stack.h>`)**
-  - `vstack_array<T>` integrated with compiler-assigned data stacks.
+- [x] **Task 3.1: Text & Slices (`<vstd/string.h>`, `<vstd/span.h>`)**
+  - Non-allocating `vstring_view` (`vfixed_string_def`) and contiguous `vspan<T>` (`vspan_def`), with plugin root-lifetime propagation and 100% `llvm-cov` coverage.
+- [x] **Task 3.2: Stack Arrays (`<vstd/stack.h>`)**
+  - `vstack_array<T>` (`vstack_array_def`) integrated with compiler-assigned data stacks, enforcing single-active-array per data stack at compile time and zero-relocation growth.
 - [ ] **Task 3.3: Inplace Containers (`<vstd/vector.h>`)**
   - Fixed capacity `vvector<T, N>` with compile-time bounded assertions.
 - [ ] **Task 3.4: Cache-Aligned Maps (`<vstd/map.h>`, `<vstd/hash.h>`)**
   - `vflat_map` (parallel contiguous binary search) and `vhash_flat` (open addressing).
 - [ ] **Task 3.5: Algebraic Data Types (`<vstd/variant.h>`)**
   - `vvariant` with exhaustive compile-time checked `match`.
-- [ ] **Task 3.6: Strong Types (`<vstd/strong.h>`)**
-  - `vstrong` newtype wrappers with zero implicit conversions.
-- [ ] **Task 3.7: Branch-Proven Result (`<vstd/result.h>`)**
-  - `vresult<T, E>` variant unions with required branch checking before access.
+- [x] **Task 3.6: Strong Types (`<vstd/strong.h>`)**
+  - `vstrong` newtype wrappers (`vstrong_make`, `vstrong_unwrap`, `vstrong_eq`, `vstrong_lt`) with zero implicit conversions and zero size overhead.
+- [x] **Task 3.7: Branch-Proven Result (`<vstd/result.h>`)**
+  - `vresult<T, E>` (`vresult_def`) flat error unions with plugin-enforced `.is_ok` branch checking before `.value` access.
 - [ ] **Task 3.8: Concurrency & Linear Guards (`<vstd/channel.h>`, `<vstd/atomic.h>`)**
   - Lock-free SPSC flat-value channels and linear `vatomic<T>`.
 - [ ] **Task 3.9: Streaming & Ternary Substrate (`<vstd/stream.h>`, `<vstd/ternary.h>`)**
   - Packed ternary weights {-1, 0, 1} as `Bits(2)` codes, 4 per byte, `consteval` tables pinned in BRAM; weight image verified via `from_bytes` on load.
   - `ll.ml/model/` blocks: token shift (register-delayed stream), GLU mux gates, RMSNorm with power-of-two scales (shifts only), KV cache as pre-banked BRAM arena with declared `ContextCap` — overflow is a compile error (`test_banned_context_overflow.m`).
-- [ ] **Task 3.10: Freestanding Floor (`sys0/` / `ll.arch/`)**
-  - Arch-tuned `memcpy`/`memset`/`memcmp` (NEON / AVX-512 variants, non-temporal stores); custom linker-script layouts, per-core boot trampolines, TLS via `GS`/`TPIDR_EL0` — no OS interaction.
-  - MMU-as-library: page tables, huge pages, DMA-coherent regions, and Write-Back vs Write-Combining caching as distinct types; direct `rdtsc`/`CNTVCT_EL0` clock access layers.
+- [x] **Task 3.10: Freestanding Floor (`sys0/` / `ll.arch/`)**
+  - Arch-tuned `sys0_memcpy`/`sys0_memcpy_nt`/`sys0_memset`/`sys0_memcmp` (`<sys0/mem.h>`); per-core boot trampolines and TLS via `GS`/`TPIDR_EL0` (`<sys0/boot.h>`) — no OS interaction.
+  - MMU-as-library (`<sys0/mmu.h>`): page tables, huge pages, DMA-coherent regions, and Write-Back vs Write-Combining caching as distinct types; direct `rdtsc`/`CNTVCT_EL0` clock access layers (`<sys0/time.h>`).
 - [ ] **Task 3.11: Device & Real-Time Non-Blocking I/O (`<vstd/io.h>`, `hw/`)**
   - Blocking POSIX `read`/`write` banned on constrained paths; fixed-size DMA lines registered directly with devices; direct ring-buffered streaming bound into the execution pipeline.
   - Driver-as-library bindings plus an in-process loopback simulation transport so bare-metal network binaries run on developer machines before target flashing.

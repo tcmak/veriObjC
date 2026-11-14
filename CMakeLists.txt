@@ -19,14 +19,37 @@ set(CPPUTEST_INCLUDE_DIRS "${CPPUTEST_ROOT}/include")
 set(CPPUTEST_LIB "${CPPUTEST_ROOT}/cpputest_build/src/CppUTest/libCppUTest.a")
 set(CPPUTEST_EXT_LIB "${CPPUTEST_ROOT}/cpputest_build/src/CppUTestExt/libCppUTestExt.a")
 
-# Public include directories for runtime
-include_directories(
+# Per-component INTERFACE targets enforcing the Phase 3 Layer Table:
+#   rt   -> (nothing)
+#   vstd -> rt, vstd
+#   sys0 -> rt, sys0
+#   hw   -> rt, sys0, hw
+add_library(veriobjc_rt INTERFACE)
+target_include_directories(veriobjc_rt INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
 )
 
+add_library(veriobjc_vstd INTERFACE)
+target_include_directories(veriobjc_vstd INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/vstd/include
+)
+target_link_libraries(veriobjc_vstd INTERFACE veriobjc_rt)
+
+add_library(veriobjc_sys0 INTERFACE)
+target_include_directories(veriobjc_sys0 INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/sys0/include
+)
+target_link_libraries(veriobjc_sys0 INTERFACE veriobjc_rt)
+
+add_library(veriobjc_hw INTERFACE)
+target_include_directories(veriobjc_hw INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/hw/include
+)
+target_link_libraries(veriobjc_hw INTERFACE veriobjc_sys0 veriobjc_rt)
+
 enable_testing()
 
-# Unit tests for micro-runtime
+# Unit tests for micro-runtime and vstd / sys0 substrates
 add_executable(unit_rt_tests
     tests/unit_rt/main.cpp
     tests/unit_rt/TestStackAlloc.cpp
@@ -35,14 +58,28 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestScopeAndLayout.cpp
     tests/unit_rt/TestDispatch.cpp
     tests/unit_rt/TestTapeAndRelPtr.cpp
+    tests/unit_rt/TestVstdWave1.cpp
 )
 
-target_include_directories(unit_rt_tests PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
+target_link_libraries(unit_rt_tests PRIVATE
+    veriobjc_rt
+    veriobjc_vstd
+    veriobjc_sys0
+    veriobjc_hw
 )
 
 target_include_directories(unit_rt_tests SYSTEM PRIVATE
     ${CPPUTEST_INCLUDE_DIRS}
+)
+
+target_compile_options(unit_rt_tests PRIVATE
+    -fprofile-instr-generate
+    -fcoverage-mapping
+)
+
+target_link_options(unit_rt_tests PRIVATE
+    -fprofile-instr-generate
+    -fcoverage-mapping
 )
 
 target_link_libraries(unit_rt_tests PRIVATE
@@ -100,4 +137,9 @@ add_test(NAME examples_smoke_tests
 # Test target for dual-direction Valid-ObjC Ban Rejection Corpus
 add_test(NAME ban_corpus_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_ban_corpus_test.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Test target for Phase 3 Header Cohesion & Layer Table Gate
+add_test(NAME vstd_cohesion_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/check_vstd_cohesion.sh ${CMAKE_CURRENT_SOURCE_DIR}
 )

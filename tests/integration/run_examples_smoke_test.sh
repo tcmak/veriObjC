@@ -34,6 +34,8 @@ for m_file in "$REPO_ROOT"/examples/*.m; do
              -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
+             -I"$REPO_ROOT/vstd/include" \
+             -I"$REPO_ROOT/sys0/include" \
              -c "$m_file" \
              -o "$TMP_OBJ"
 
@@ -72,6 +74,7 @@ for c_file in "$REPO_ROOT"/examples/*.c; do
              -Xclang -load -Xclang "$PLUGIN_PATH" \
              -Xclang -add-plugin -Xclang veriobjc-check \
              -I"$REPO_ROOT/rt/include" \
+             -I"$REPO_ROOT/sys0/include" \
              -c "$c_file" \
              -o "$TMP_OBJ"
 

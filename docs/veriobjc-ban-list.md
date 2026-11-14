@@ -45,6 +45,9 @@ Two artifacts, both CI gates:
 | `@shared` refcounting outside the `@cold` quarantine | Yes (ARC) | "`@shared` retain permitted only in `@cold`" | Data stacks / `vpool`; `vweak` | `test_banned_shared_nolatency.m` ✓ |
 | Intermediate copy of built-in-place type | Yes | "Intermediate copy of built-in-place type" | `veriobjc_push_inplace` destination threading | `test_banned_temp_copy_inplace.m` ✓ |
 | Cyclic static task DAG | — | "Cycle detected in static task DAG" | Acyclic compile-time DAG with proven WCET | `test_banned_dag_cycle.m` ✓ |
+| `vstring_view` / `vspan` escaping backing root scope | Yes | "reference rooted at ... does not outlive the destination" | Keep views within backing buffer scope or copy into `vfixed_string` | `test_banned_view_escapes_root.m` ✓ |
+| Unchecked `vresult<T, E>` `.value` read without `.is_ok` guard | Yes | "Unchecked vresult access" | Branch on `vresult_is_ok(res)` or use `vresult_unwrap_or` | `test_banned_unchecked_vresult.m` ✓ |
+| Multiple concurrent `vstack_array<T>` instances on one data stack | Yes | "Multiple live vstack_array instances on the same data stack" | Separate data stacks or inner `@scoped` lifetime | `test_banned_two_stack_arrays.m` ✓ |
 
 ### C. Metaprogramming (vmeta)
 
