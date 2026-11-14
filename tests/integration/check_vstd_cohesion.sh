@@ -12,7 +12,7 @@ if [ ! -f "$README_FILE" ]; then
     exit 1
 fi
 
-check_header_layer() {
+verify_header_passes() {
     local hdr_path="$1"
     local layer_name="$2"
     local forbidden_regex="$3"
@@ -20,18 +20,27 @@ check_header_layer() {
     local include_flags=("$@")
 
     local rel_hdr="${hdr_path#"$REPO_ROOT"/}"
-    echo "[COHESION] Checking $rel_hdr (layer: $layer_name)"
-
     local trace_out
     if ! trace_out=$(clang-23 -std=gnu23 -Wall -Wextra -Werror -H -fsyntax-only "${include_flags[@]}" -x c-header "$hdr_path" 2>&1); then
         echo "[FAIL] Header $rel_hdr failed standalone compilation under layer '$layer_name' include roots!"
         echo "$trace_out"
-        exit 1
+        return 1
     fi
 
     if [ -n "$forbidden_regex" ] && echo "$trace_out" | grep -E "^\.+ " | grep -qE "$forbidden_regex"; then
         echo "[FAIL] Layer violation in $rel_hdr (layer '$layer_name' imported forbidden dependency matching '$forbidden_regex')!"
         echo "$trace_out" | grep -E "^\.+ "
+        return 1
+    fi
+    return 0
+}
+
+check_header_layer() {
+    local hdr_path="$1"
+    local layer_name="$2"
+    local rel_hdr="${hdr_path#"$REPO_ROOT"/}"
+    echo "[COHESION] Checking $rel_hdr (layer: $layer_name)"
+    if ! verify_header_passes "$@"; then
         exit 1
     fi
 }
@@ -77,13 +86,14 @@ for hdr in "$REPO_ROOT"/hw/include/hw/*.h; do
     fi
 done
 
-# 5. Negative Self-Test: Verify gate rejects a synthetic leaf header with an illegal cross-layer include
+# 5. Negative Self-Test: Verify gate rejects a synthetic leaf header with an illegal cross-layer include (both C and Objective-C halves)
 TMP_BAD_HDR=$(mktemp /tmp/veriobjc_bad_hdr_XXXXXX.h)
+TMP_BAD_OBJC_HDR=$(mktemp /tmp/veriobjc_bad_objc_hdr_XXXXXX.h)
 TMP_SRC=$(mktemp /tmp/veriobjc_leaf_XXXXXX.c)
 TMP_BIN=$(mktemp /tmp/veriobjc_leaf_bin_XXXXXX)
 TMP_HW_BIN=$(mktemp /tmp/veriobjc_hello_world_XXXXXX)
 TMP_UART_BIN=$(mktemp /tmp/veriobjc_hello_uart_XXXXXX)
-trap 'rm -f "$TMP_BAD_HDR" "$TMP_SRC" "$TMP_BIN" "$TMP_HW_BIN" "$TMP_UART_BIN"' EXIT
+trap 'rm -f "$TMP_BAD_HDR" "$TMP_BAD_OBJC_HDR" "$TMP_SRC" "$TMP_BIN" "$TMP_HW_BIN" "$TMP_UART_BIN"' EXIT
 
 cat > "$TMP_BAD_HDR" << 'EOF'
 #pragma once
@@ -91,12 +101,24 @@ cat > "$TMP_BAD_HDR" << 'EOF'
 #include "sys0/mem.h"
 EOF
 
-BAD_TRACE=$(clang-23 -std=gnu23 -H -fsyntax-only -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" -x c-header "$TMP_BAD_HDR" 2>&1 || true)
-if ! echo "$BAD_TRACE" | grep -E "^\.+ " | grep -qE "(sys0/|hw/)"; then
-    echo "[FAIL] Negative self-test failed: synthetic cross-layer include was not detected!"
+if verify_header_passes "$TMP_BAD_HDR" "vstd" "(sys0/|hw/)" -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" >/dev/null 2>&1; then
+    echo "[FAIL] Negative self-test failed: synthetic C cross-layer include was not detected!"
     exit 1
 fi
-echo "[PASS] Negative self-test verified: cross-layer include in vstd header is caught."
+
+cat > "$TMP_BAD_OBJC_HDR" << 'EOF'
+#pragma once
+#include "veriobjc_runtime.h"
+#ifdef __OBJC__
+#include "sys0/mem.h"
+#endif
+EOF
+
+if verify_header_passes "$TMP_BAD_OBJC_HDR" "vstd" "(sys0/|hw/)" -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" >/dev/null 2>&1; then
+    echo "[FAIL] Negative self-test failed: synthetic #ifdef __OBJC__ cross-layer include escaped check_header_layer!"
+    exit 1
+fi
+echo "[PASS] Negative self-test verified: cross-layer includes in both C and #ifdef __OBJC__ halves are caught."
 
 # 6. Dead-Strip (--gc-sections) Audit on <vstd/string.h> Linked Binary
 cat > "$TMP_SRC" << 'EOF'

@@ -1,14 +1,25 @@
 // EXPECTED_DIAGNOSTIC: VeriObjC Violation: vvector push exceeds static capacity
-// Valid C/Objective-C runtime bounds check, banned in VeriObjC when exceeding static vvector capacity.
+// Valid Objective-C runtime bounds check, banned in VeriObjC when exceeding static VVector<T> capacity.
 #include "veriobjc_runtime.h"
 #include "vstd/vector.h"
 
-vvector_def(TinyVec2, int32_t, 2);
+__attribute__((annotate("objc_sealed")))
+__attribute__((annotate("objc_final")))
+@interface LotElem : VVectorItem {
+@public
+    int32_t qty;
+}
+@end
 
-void overflow_vvector(void) {
-    TinyVec2 vec;
-    vvector_init(&vec);
-    vvector_push(&vec, 10);
-    vvector_push(&vec, 20);
-    vvector_push(&vec, 30);
+@implementation LotElem
+@end
+
+void overflow_vvector(VVector<LotElem *> *vec, LotElem *item) {
+    if (!vec || !item) return;
+    [vec initVec];
+    [vec push:item];
+    [vec push:item];
+    [vec push:item];
+    [vec push:item];
+    [vec push:item];
 }

@@ -9,7 +9,7 @@
 #include "vstd/stream.h"
 #include "vstd/ternary.h"
 
-vvector_def(IntVec4, int32_t, 4);
+__vvector_storage_def(IntVec4, int32_t, 4);
 vflat_map_def(OrderFlatMap4, uint64_t, int32_t, 4);
 vhash_flat_def(OrderHashMap8, uint64_t, int32_t, 8);
 
@@ -68,6 +68,41 @@ TEST(VstdWave2And3Group, InplaceVectorOperationsAndBounds) {
     POINTERS_EQUAL(nullptr, vvector_at(&vec, 4u));
     POINTERS_EQUAL(nullptr, vvector_at((const IntVec4 *)nullptr, 0u));
 }
+
+#ifdef __OBJC__
+TEST(VstdWave2And3Group, VVectorGenericObjectiveCDirectMethods) {
+    struct {
+        uint32_t count;
+        uint32_t cap;
+        VVectorItem *buf[VVECTOR_GENERIC_CAPACITY];
+    } raw_vec;
+    struct {
+        uint32_t item_tag;
+    } it0 = {101u}, it1 = {202u}, it2 = {303u}, it3 = {404u}, it4 = {505u};
+
+    VVector *vec = (VVector *)&raw_vec;
+    __veriobjc_direct_VVector__initVec((VVector *)nullptr);
+    __veriobjc_direct_VVector__initVec(vec);
+
+    LONGS_EQUAL(0u, __veriobjc_direct_VVector__len(vec));
+    LONGS_EQUAL(VVECTOR_GENERIC_CAPACITY, __veriobjc_direct_VVector__cap(vec));
+    LONGS_EQUAL(0u, __veriobjc_direct_VVector__len((VVector *)nullptr));
+    LONGS_EQUAL(0u, __veriobjc_direct_VVector__cap((VVector *)nullptr));
+
+    CHECK_FALSE(__veriobjc_direct_VVector__push_((VVector *)nullptr, (VVectorItem *)&it0));
+    CHECK_TRUE(__veriobjc_direct_VVector__push_(vec, (VVectorItem *)&it0));
+    CHECK_TRUE(__veriobjc_direct_VVector__push_(vec, (VVectorItem *)&it1));
+    CHECK_TRUE(__veriobjc_direct_VVector__push_(vec, (VVectorItem *)&it2));
+    CHECK_TRUE(__veriobjc_direct_VVector__push_(vec, (VVectorItem *)&it3));
+    CHECK_FALSE(__veriobjc_direct_VVector__push_(vec, (VVectorItem *)&it4));
+
+    LONGS_EQUAL(4u, __veriobjc_direct_VVector__len(vec));
+    POINTERS_EQUAL((VVectorItem *)&it0, __veriobjc_direct_VVector__at_(vec, 0u));
+    POINTERS_EQUAL((VVectorItem *)&it3, __veriobjc_direct_VVector__at_(vec, 3u));
+    POINTERS_EQUAL(nullptr, __veriobjc_direct_VVector__at_(vec, 4u));
+    POINTERS_EQUAL(nullptr, __veriobjc_direct_VVector__at_((VVector *)nullptr, 0u));
+}
+#endif
 
 TEST(VstdWave2And3Group, FlatMapSortedBinarySearchAndDeterministicOrder) {
     OrderFlatMap4 fmap;

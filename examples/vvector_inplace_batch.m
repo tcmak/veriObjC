@@ -17,7 +17,7 @@ __attribute__((annotate("objc_final")))
 @implementation OrderBatchItem
 @end
 
-vvector_def(OrderBatchVec4, int32_t, 4);
+__vvector_storage_def(OrderBatchVec4, int32_t, 4);
 
 static void construct_order_lot_inplace(int32_t *out_slot, int32_t base_qty) {
     if (out_slot) {

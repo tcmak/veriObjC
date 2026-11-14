@@ -13,7 +13,7 @@ __attribute__((objc_final))
 @implementation OrderLotItem
 @end
 
-vvector_def(BatchVec4, int32_t, 4);
+__vvector_storage_def(BatchVec4, int32_t, 4);
 vstack_array_def(StackIntArr, int32_t);
 
 static int32_t parse_lot_value(int32_t raw) {

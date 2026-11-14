@@ -86,3 +86,48 @@ Per the Phase 3 Execution Guide (*"expect compiler friction, and treat every fri
   The initial C macro passed `(const void *)(const ElemType[1]){ (val) }` to `__vvector_push_raw` and copied bytes in a loop, materializing a stack temporary before copying into `vec.buf[idx]`.
 - **Root Cause & Fix:**
   Replace `__vvector_push_raw` with direct slot allocation (`__vvector_alloc_slot_raw`) followed by direct assignment into `(vec_ptr)->buf[(vec_ptr)->count - 1u] = (val)`. Disassembly (`llvm-objdump -d`) confirms `parse_value(x)` writes its return register `%eax` directly into the `vec.buf` slot with zero temporary and zero `memcpy`.
+
+---
+
+## 5. Friction `VG-005`: `vgeneric` Lacks Value / Integer Parameters and Non-Pointer Value Type Arguments (Blocks `vvector<T, N>`)
+
+- **Component:** Clang Objective-C `ObjCTypeParamList` Parser / `VeriObjCPlugin.cpp` (tracked for **Task 3.3c**)
+- **Status:** Open — Tracked in **Task 3.3c** (`__vvector_storage_def` retained only as deprecated internal bridge until resolved)
+- **Minimal Reproducer:**
+  ```objc
+  // 1. Non-type integer capacity parameter N is rejected by Clang's ObjC generic parser:
+  @interface VVector<T : VVectorItem *, uint32_t N> {
+  @public
+      uint32_t count;
+      T buf[N];
+  }
+  @end
+
+  // 2. Scalar / flat C struct value specialization is rejected by Clang's ObjC type parameter check:
+  VVector<int32_t, 4> batch; // error: type argument 'int32_t' is not an Objective-C object pointer
+  ```
+- **Symptom:**
+  Clang's built-in Objective-C lightweight generic grammar (`ParseObjCTypeParamList` / `Sema::ActOnObjCTypeParam`) requires every parameter in `<...>` to be an Objective-C object pointer type (`id` or `ClassName *`). Integer capacity constants (`N`) and flat value types (`int32_t`, `@flat struct`) cannot be passed as `<T, N>` arguments without a custom frontend/plugin lowering pass.
+- **Planned Resolution (Task 3.3c):**
+  Implement `vvector<T, N>` monomorphization lowering in `VeriObjCPlugin` so value types `T` and compile-time integer capacities `N` (`vconstexpr`) specialize a single canonical container definition, then delete the internal `__vvector_storage_def` bridge macro.
+
+---
+
+## 6. Friction `VG-006`: Flat `@interface` Cannot Be Statically Allocated or Returned by Value (Blocks Return-by-Value on `VVector<T>`)
+
+- **Component:** Clang Objective-C Sema (`SemaType.cpp` / `SemaDecl.cpp`) / `VeriObjCPlugin.cpp` (tracked for **Task 3.3c**)
+- **Status:** Open — Tracked in **Task 3.3c** (`__vvector_storage_def` retained only as deprecated internal bridge until resolved)
+- **Minimal Reproducer:**
+  ```objc
+  VVector<OrderLotItem *> build_vector_by_value(OrderLotItem *a, OrderLotItem *b) {
+      VVector<OrderLotItem *> out; // error: interface type cannot be statically allocated
+      [&out initVec];
+      [&out push:a];
+      [&out push:b];
+      return out; // error: interface type 'VVector<OrderLotItem *>' cannot be returned by value
+  }
+  ```
+- **Symptom:**
+  Stock Clang's Objective-C Sema unconditionally forbids non-pointer `ObjCObjectType` in local variable declarations, parameter types, and function return types (`diag::err_objc_object_assignment` / `diag::err_statically_allocated_object`), even when the `@interface` is `@final`, `@sealed`, and has a fixed compile-time layout (`count`, `cap`, `buf[N]`).
+- **Planned Resolution (Task 3.3c):**
+  Lower `@flat` / value-convertible `@final @sealed` container interfaces (`vvector<T, N>`) to value-type C record layouts in ABI/return positions so `VVector<T>` can be allocated inline on the C call stack and returned by value via `sret`/registers without `__vvector_storage_def`.
