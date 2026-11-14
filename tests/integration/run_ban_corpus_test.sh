@@ -92,6 +92,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_vvector_overflow.m)
             EXPECTED_DIAG="vvector push exceeds static capacity"
             ;;
+        valid_objc_vvector_unsealed_arg.m)
+            EXPECTED_DIAG="Invalid vgeneric type argument"
+            ;;
         valid_objc_vhash_load_ceiling.m)
             EXPECTED_DIAG="vhash_flat load-factor ceiling exceeded"
             ;;

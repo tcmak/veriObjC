@@ -2,13 +2,24 @@
 #include "veriobjc_runtime.h"
 #include "vstd/vector.h"
 
-vvector_def(TinyVec2, int32_t, 2);
+__attribute__((objc_sealed))
+__attribute__((objc_final))
+@interface LotElem : VVectorItem {
+@public
+    int32_t qty;
+}
+@end
 
-void overflow_vvector(void) {
-    TinyVec2 vec;
-    vvector_init(&vec);
-    vvector_push(&vec, 10);
-    vvector_push(&vec, 20);
-    // 3rd push on a capacity-2 vvector must fail at compile time
-    vvector_push(&vec, 30);
+@implementation LotElem
+@end
+
+void overflow_vvector(VVector<LotElem *> *vec, LotElem *item) {
+    if (!vec || !item) return;
+    [vec initVec];
+    [vec push:item];
+    [vec push:item];
+    [vec push:item];
+    [vec push:item];
+    // 5th push on a capacity-4 VVector<T> must fail at compile time
+    [vec push:item];
 }

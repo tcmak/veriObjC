@@ -61,6 +61,7 @@ Two artifacts, both CI gates:
 | Banned construct | Diagnostic (key phrase) | VeriObjC replacement | Test |
 | :--- | :--- | :--- | :--- |
 | Unconstrained type parameters | "Unconstrained type parameter" | `vgeneric` with declared constraints | `test_banned_unconstrained_generic.m` ✓ |
+| Unsealed type argument to `vgeneric` specialization | "Invalid vgeneric type argument" | `@sealed` / `@final` nominal type arguments | `test_banned_vvector_unsealed_arg.m` ✓ |
 | Specialization / SFINAE-style probing | "Banned specialization/probing" | Plain overloads; explicit `where` | `test_banned_specialization.m` ✓ |
 | Computation macros (preprocessor codegen) | "Banned computation macro" | `vconstexpr`; `@reflect`/`@objc_soa` codegen | `test_banned_computation_macro.m` ✓ |
 | Unbounded compile-time recursion | "Fuel exhausted (function, line, steps)" | Fueled interpreter — clean error, never a hang | `test_banned_vconstexpr_fuel.m` ✓ |
