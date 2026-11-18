@@ -896,6 +896,85 @@ static inline bool veriobjc_verify_rel32_link(const struct veriobjc_rel32 *link,
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Task 5.6a: Frozen Two-Profile VTPE v1.0 Format & §8 Rejection Contract
+// ---------------------------------------------------------------------------
+
+#define VTPE_V1_MAGIC           0x45505456u // "VTPE" (0x56 0x54 0x50 0x45)
+#define VTPE_V1_VERSION_MAJOR   1u
+#define VTPE_V1_FLAG_LINKS      0x01u
+#define VTPE_V1_FLAG_MANIFEST   0x02u
+#define VTPE_V1_FLAG_EXTENDED   0x04u
+#define VTPE_V1_FLAG_RESERVED   0xF8u
+
+#define VTPE_V1_TAG_WEIGHTS         0x0001u
+#define VTPE_V1_TAG_SCALES          0x0002u
+#define VTPE_V1_TAG_ARCH_DESCRIPTOR 0x0003u
+#define VTPE_V1_TAG_MANIFEST        0x0004u
+#define VTPE_V1_TAG_LINK_TABLE      0x0005u
+#define VTPE_V1_TAG_FP32_AUX        0x0006u
+
+typedef enum : uint32_t {
+    VTPE_PROFILE_CORE     = 0u,
+    VTPE_PROFILE_EXTENDED = 1u
+} vtpe_v1_profile_t;
+
+typedef enum : uint32_t {
+    VTPE_OK = 0u,
+    VTPE_ERR_NULL_OR_TRUNCATED,
+    VTPE_ERR_BAD_MAGIC,
+    VTPE_ERR_UNSUPPORTED_VERSION,
+    VTPE_ERR_NONZERO_RESERVED,
+    VTPE_ERR_CHECKSUM_MISMATCH,
+    VTPE_ERR_UNKNOWN_FLAGS,
+    VTPE_ERR_UNSUPPORTED_PROFILE,
+    VTPE_ERR_SECTION_COUNT_MISMATCH,
+    VTPE_ERR_LENGTH_MISMATCH,
+    VTPE_ERR_ARTIFACT_ID_MISMATCH,
+    VTPE_ERR_UNKNOWN_TAG,
+    VTPE_ERR_DUPLICATE_TAG,
+    VTPE_ERR_PROFILE_SECTION_FORBIDDEN,
+    VTPE_ERR_MISSING_REQUIRED_SECTION,
+    VTPE_ERR_MALFORMED_ARCH,
+    VTPE_ERR_DIM_PAYLOAD_MISMATCH,
+    VTPE_ERR_RESERVED_TERNARY_CODE,
+    VTPE_ERR_NONZERO_PADDING,
+    VTPE_ERR_INVALID_SCALE,
+    VTPE_ERR_MALFORMED_MANIFEST,
+    VTPE_ERR_INVALID_LINK,
+    VTPE_ERR_MALFORMED_FP32_AUX
+} vtpe_v1_error_t;
+
+struct __attribute__((packed)) vtpe_v1_header {
+    uint32_t magic;
+    uint8_t  version_major;
+    uint8_t  version_minor;
+    uint8_t  flags;
+    uint8_t  section_count;
+    uint32_t total_length;
+    uint32_t header_fnv1a;
+    uint64_t artifact_id;
+    uint8_t  reserved[8];
+};
+
+struct __attribute__((packed)) vtpe_v1_section_header {
+    uint16_t tag;
+    uint16_t reserved;
+    uint32_t length;
+    uint32_t payload_fnv1a;
+};
+
+static inline vtpe_v1_error_t vtpe_v1_validate_tape(
+    const void *in_buf,
+    size_t in_len,
+    vtpe_v1_profile_t reader_profile
+) {
+    (void)in_buf;
+    (void)in_len;
+    (void)reader_profile;
+    return VTPE_ERR_BAD_MAGIC; // Red stub prior to Task 5.6a Green implementation
+}
+
 #ifdef __cplusplus
 }
 #endif

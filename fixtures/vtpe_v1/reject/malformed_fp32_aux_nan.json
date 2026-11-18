@@ -1,0 +1,7 @@
+{
+  "fixture": "reject/malformed_fp32_aux_nan.bin",
+  "expected": "reject",
+  "error_code": "VTPE_ERR_MALFORMED_FP32_AUX",
+  "reader_profile": "extended",
+  "reason": "Extended tape fp32_aux section contains a non-finite IEEE-754 NaN value (0x7fc00001)."
+}

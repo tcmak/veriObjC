@@ -1,0 +1,21 @@
+{
+  "fixture": "accept/core_with_manifest_and_links.bin",
+  "expected": "accept",
+  "error_code": "VTPE_OK",
+  "reader_profile": "core",
+  "tape_profile": "core",
+  "flags": "0x03",
+  "section_count": 5,
+  "byte_length": 249,
+  "artifact_id_hex": "0xf78df676d31dd3dd",
+  "header_fnv1a_hex": "0xc3a33234",
+  "spot_checks": {
+    "producer_id": "ternarytape.jl/0.1.0",
+    "training_run_id": "run_20261118_bitnet_b158_seed042",
+    "quant_algorithm": "absmean-b158-pot",
+    "link_deltas": [
+      4,
+      -4
+    ]
+  }
+}

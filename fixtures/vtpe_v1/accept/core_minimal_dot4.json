@@ -1,0 +1,32 @@
+{
+  "fixture": "accept/core_minimal_dot4.bin",
+  "expected": "accept",
+  "error_code": "VTPE_OK",
+  "reader_profile": "core",
+  "tape_profile": "core",
+  "flags": "0x00",
+  "section_count": 3,
+  "byte_length": 92,
+  "artifact_id_hex": "0x17a6203372bd5f75",
+  "header_fnv1a_hex": "0x180951f7",
+  "spot_checks": {
+    "n_layers": 1,
+    "layer0_kind": "ternary_dense",
+    "dim_in": 4,
+    "dim_out": 2,
+    "reduce_stages": 2,
+    "scale_exp": -2,
+    "row0_weights": [
+      1,
+      -1,
+      0,
+      1
+    ],
+    "row1_weights": [
+      -1,
+      1,
+      1,
+      0
+    ]
+  }
+}

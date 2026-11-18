@@ -1,0 +1,7 @@
+{
+  "fixture": "reject/bad_section_checksum.bin",
+  "expected": "reject",
+  "error_code": "VTPE_ERR_CHECKSUM_MISMATCH",
+  "reader_profile": "core",
+  "reason": "Section 0x0001 (weights) payload_fnv1a does not match its payload bytes."
+}
