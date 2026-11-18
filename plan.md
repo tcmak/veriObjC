@@ -273,11 +273,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 - [ ] **Task 4.1: Cycle-Accurate Microbenchmark Harness**
   - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0`) on isolated cores.
+  - *Amendment 4 (2026-11-18):* benchmark reporting adopts the kit's M6 methodology (fixed shapes, cited baselines, $-normalization, VTPE profile + DSP mode named on every number) — no second protocol is invented here.
 - [ ] **Task 4.2: Survivor Reports as Build Artifacts**
   - `--effects-report`: per-line survivor report of effectful call sites.
   - `--branch-report`: classification of unproven data-dependent branches.
   - `--mono-report`: monomorphization byte budget and instantiation tracking.
-  - `--hw-report`: per-kernel fabric resource audit (LUTs/FFs/BRAMs/DSPs) with the zero-DSP synthesis gate.
+  - `--hw-report`: per-kernel fabric resource audit (LUTs/FFs/BRAMs/DSPs) with the zero-DSP synthesis gate; *Amendment 4:* gains the VTPE profile + DSP-mode fields the shared benchmark methodology requires.
 - [ ] **Task 4.3: Latency Budget Gates**
   - CI budget check: p50/p99 regression beyond noise band fails build.
 - [ ] **Task 4.4: Formal Math Proof Integration (SMACK / Z3)**
@@ -292,7 +293,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified disassembly and symbol tables contain **0 calls to `objc_msgSend` / `objc_msg_lookup`** and **0 undefined external symbols** in freestanding kernel mode.
 - [x] **Task 5.2: Round-Trip Snapshot Persistence**
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.
-  - *Format extraction into the versioned external contract (producers outside this repo) is tracked as Task 5.6.*
+  - *Format extraction into the versioned external contract (producers outside this repo) is tracked as Task 5.6a (freeze + golden tapes) / 5.6b (full reconciliation).*
 - [x] **Task 5.3: Ternary Block Synthesis & Zero-DSP Gate**
   - Compile `examples/ternary_glu_block.m` through the HLS flow (`--hw-report`); assert the synthesis report shows **0 DSP blocks**, `ternary_dot<512>` elaborates to `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) has `@latency(cycles = 10)`.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
@@ -300,7 +301,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - *Scope note: Task 5.3 is the plugin-emitted elaboration-level gate (the plugin refuses to emit multiplication, so its own model cannot contain DSPs). This task closes the loop with a real synthesis flow — the original spec's "post-synthesis vendor report" criterion.*
   - Named, version-pinned synthesis toolchain (vendor HLS or open flow) invoked from CI; **DSP = 0 and BRAM weight-pinning read from the vendor utilization report**, not the plugin's self-report.
   - Timing closure at the target clock against the declared `@latency(cycles = 9)` for `ternary_dot<512>` and `@latency(cycles = 10)` for `TernaryGLUBlock`; C/RTL cosimulation equivalence for `examples/ternary_glu_block.m` against the C model over a test corpus.
-  - Cosim oracle: the quantized reference interpreter from the external TernaryTape.jl project (a conforming producer of the Tape Format Spec, Task 5.6) supplies the golden model — consumed as committed fixtures; **no Julia toolchain enters VeriObjC CI**.
+  - Cosim oracle: the quantized reference interpreter from the external TernaryTape.jl project (a conforming producer of the Tape Format Spec, unblocked by Task 5.6a) supplies the golden model — consumed as committed fixtures; **no Julia toolchain enters VeriObjC CI**.
   - Negative test: corrupted weight tape rejected by `veriobjc_from_bytes` → kernel never loads, nothing reaches the hardware boundary.
   - Manifest-declared LUT budget checked against the vendor's LUT count (depends on Phase 6 manifest).
   - Acceptance: synthesis report, utilization table, and cosim log committed as reproducible artifacts; any DSP block or timing violation fails the build.
@@ -313,10 +314,27 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
     - One-store reset under heterogeneity: scope exit restores the stack top to the scope mark in **exactly one `movq`** despite mixed concrete sizes (`llvm-objdump` audit).
     - No escape: storing any upcast (superclass-typed) reference into an outer-scope destination fails with the reference-root diagnostic; all upcast references are dead at scope exit.
     - 100% region/function/branch coverage on the new paths (`llvm-cov`).
-- [ ] **Task 5.6: Tape Format Specification v1 & Golden Vector Corpus**
-  - Extract the `veriobjc_to_bytes` / `veriobjc_from_bytes` framing, checksum, and self-relative link rules into a versioned, byte-exact spec (`docs/veriobjc-tape-format.md`) — the contract every external producer (TernaryTape.jl/Lux, PyTorch/BitNet-style, C++ tools) encodes against. `rt/` is authoritative until the spec is reconciled against it.
+- [ ] **Task 5.6a: VTPE v1 Format Freeze & Golden Tape Corpus (do first — portfolio-critical)**
+  - *Amendment 1 (2026-11-18): 5.6 is split so the parts every other repo needs land first, without waiting for full `rt/` reconciliation.*
+  - Freeze the two-profile VTPE v1 contract as implemented by consumers: 32-byte header, FNV-1a-32 framing, flags bits (bit 2 = profile; unknown bits rejected with named diagnostics — kit ADR-0002), ternary section packing, and the §8 rejection contract.
+  - Publish 5–10 **golden VTPE tapes** (known-good parses, known-bad rejects, known outputs) as committed test fixtures, consumable cross-repo.
+  - **Priority:** 5.6a outranks Task 3.3c — 3.3c gates Phase 4 benchmarks, but 5.6a gates every cross-repo artifact (Task 5.7 runtime slice, Task 5.8 conformance suite, kit M4.5 INT8 tape oracle, setun loader migration, TernaryTape.jl unblock).
+- [ ] **Task 5.6b: Tape Format Specification v1 — Full `rt/` Reconciliation & Publication**
+  - Full original Task 5.6 scope: extract the `veriobjc_to_bytes` / `veriobjc_from_bytes` framing, checksum, and self-relative link rules into a versioned, byte-exact spec (`docs/veriobjc-tape-format.md`) regenerated from the implementation — `rt/` is authoritative.
   - Golden vector corpus: named accept fixtures plus per-byte mutation expectations — every byte index in a small reference tape must have a mutation that flips accept → reject (extends the existing exhaustive sweep in `TestTapeAndRelPtr.cpp`, Task 5.2).
   - Dual-direction corpus gate for external tapes: committed fixtures produced by external encoders must load clean and be rejected under mutation. CI runs the C loader only — **no producer toolchain (Julia or otherwise) is ever required in VeriObjC CI**.
+  - *No longer blocks the other repos: TernaryTape.jl and the portfolio conformance work unblock on 5.6a; 5.6b is the final contract publication.*
+
+- [ ] **Task 5.7: veriStream Runtime Slice (`rt/vtpe_reader`, `rt/dispatch`, `rt/scheduler`)** *(Amendment 2 — rephaseable any time after 5.6a)*
+  - `rt/vtpe_reader`: tape parser implementing the §8 rejection contract, validated against the 5.6a golden tapes.
+  - `rt/dispatch`: backend dispatch abstraction with two initial backends — the setun accelerator (LiteX CSR/DMA via `AccelDriver`, Season 2–3) and the kit's HLS tile.
+  - `rt/scheduler`: map a tape's matmuls onto KERNEL_SPEC kernel invocations (tiling, buffer descriptors, invocation order).
+  - Host-side `fp32_aux` handling: embeddings/RMSNorm/softmax remain host-consumed, never hardware-visible (kit data-flow rule).
+  - **Acceptance:** "parse one Core-profile tape, run one matmul on the setun accelerator, return C, bit-exact vs golden" as a committed integration test.
+
+- [ ] **Task 5.8: Portfolio Golden-Tape Conformance Suite** *(Amendment 3 — VeriObjC owns it as format owner)*
+  - The 5.6a golden tapes + a runner each backend must pass, wrapped in a portfolio-level CI job exercised against: setun's `ref/format.py` + RTL sim, the kit's M4.5 INT8 tape oracle, and TernaryTape.jl's reference interpreter.
+  - **Acceptance:** one command reproduces all three consumption checks; failures name the repo and the violated clause. Closes the verification-bar gap (setun 6×10⁵ vectors vs kit 10 goldens) with a shared executable bar.
 
 ---
 
@@ -326,7 +344,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [ ] **Task 6.1: `vpm` Bootstrap & Content-Addressed Store**
   - Single static Go binary; downloads, verifies, and pins the exact Clang/LLVM toolchain — `vpm` must never depend on the toolchain it provisions.
   - Content-addressed store for artifacts (weight tapes, snapshot images) with manifest-recorded provenance (training run ID, quantization params, hash).
-  - Provenance is **producer-agnostic**: any conforming encoder (TernaryTape.jl/Lux, PyTorch/BitNet-style, C++ tools) may write artifacts; the store and loader depend only on the Tape Format Spec (Task 5.6), never on a producer's toolchain.
+  - Provenance is **producer-agnostic**: any conforming encoder (TernaryTape.jl/Lux, PyTorch/BitNet-style, C++ tools) may write artifacts; the store and loader depend only on the Tape Format Spec (Task 5.6a/b), never on a producer's toolchain.
 - [ ] **Task 6.2: Manifest & Budget Enforcement**
   - Manifest-declared budgets actually enforced at build time: instantiation and generated-code bytes (Task 2.8.5), `vregex` table bytes, generated-data budget, and the LUT budget (Task 2.6.3).
   - Exceeding any budget fails the build naming the package and the offending item.
