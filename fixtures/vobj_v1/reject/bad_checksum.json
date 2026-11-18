@@ -1,0 +1,6 @@
+{
+  "fixture": "reject/bad_checksum.bin",
+  "expected": "reject",
+  "error_code": "VERIOBJC_TAPE_ERR_CHECKSUM",
+  "reason": "Header FNV-1a-32 checksum does not match frame contents."
+}

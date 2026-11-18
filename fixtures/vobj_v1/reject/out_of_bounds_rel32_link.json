@@ -1,0 +1,6 @@
+{
+  "fixture": "reject/out_of_bounds_rel32_link.bin",
+  "expected": "reject",
+  "error_code": "VERIOBJC_TAPE_ERR_REL_LINK",
+  "reason": "Self-relative link target (+80) points outside [0, payload_bytes - elem_size]."
+}

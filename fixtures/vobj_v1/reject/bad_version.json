@@ -1,0 +1,6 @@
+{
+  "fixture": "reject/bad_version.bin",
+  "expected": "reject",
+  "error_code": "VERIOBJC_TAPE_ERR_HEADER",
+  "reason": "Header version is 2 instead of 1."
+}

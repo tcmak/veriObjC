@@ -1,0 +1,6 @@
+{
+  "fixture": "reject/unaligned_rel32_link.bin",
+  "expected": "reject",
+  "error_code": "VERIOBJC_TAPE_ERR_REL_LINK",
+  "reason": "Self-relative link target (+17) is not aligned to elem_size (16) boundary."
+}

@@ -1,0 +1,6 @@
+{
+  "fixture": "reject/bad_magic.bin",
+  "expected": "reject",
+  "error_code": "VERIOBJC_TAPE_ERR_HEADER",
+  "reason": "Header magic is not 'VOBJ' (0x564F424A)."
+}

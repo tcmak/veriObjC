@@ -896,6 +896,33 @@ static inline bool veriobjc_verify_rel32_link(const struct veriobjc_rel32 *link,
     return true;
 }
 
+typedef enum : uint32_t {
+    VERIOBJC_TAPE_OK = 0u,
+    VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED = 1u,
+    VERIOBJC_TAPE_ERR_HEADER = 2u,
+    VERIOBJC_TAPE_ERR_PAYLOAD_SIZE = 3u,
+    VERIOBJC_TAPE_ERR_CHECKSUM = 4u,
+    VERIOBJC_TAPE_ERR_REL_LINK = 5u
+} veriobjc_tape_error_t;
+
+static inline veriobjc_tape_error_t veriobjc_tape_validate_v1(
+    const void *in_buf,
+    size_t in_len,
+    uint16_t expected_tag,
+    uint32_t expected_elem_size,
+    const size_t *rel32_field_offsets,
+    size_t num_rel32_fields,
+    uint32_t *out_elem_count) {
+    (void)in_buf;
+    (void)in_len;
+    (void)expected_tag;
+    (void)expected_elem_size;
+    (void)rel32_field_offsets;
+    (void)num_rel32_fields;
+    (void)out_elem_count;
+    return VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED;
+}
+
 // ---------------------------------------------------------------------------
 // Task 5.6a: Frozen Two-Profile VTPE v1.0 Format & §8 Rejection Contract
 // ---------------------------------------------------------------------------

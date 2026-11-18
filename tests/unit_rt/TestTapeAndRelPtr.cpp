@@ -1,11 +1,34 @@
 #include "CppUTest/TestHarness.h"
 #include <stdint.h>
 #include <stddef.h>
+#include <stdio.h>
 #include <string.h>
+#include <string>
+#include <vector>
 
 extern "C" {
 #include "veriobjc_runtime.h"
 }
+
+namespace {
+
+std::vector<uint8_t> load_vobj_fixture(const char *rel_path) {
+    std::string full = std::string(VERIOBJC_SOURCE_DIR) + "/" + rel_path;
+    FILE *fp = fopen(full.c_str(), "rb");
+    CHECK_TEXT(fp != nullptr, full.c_str());
+    fseek(fp, 0, SEEK_END);
+    long sz = ftell(fp);
+    fseek(fp, 0, SEEK_SET);
+    std::vector<uint8_t> out(static_cast<size_t>(sz));
+    if (sz > 0) {
+        size_t n = fread(out.data(), 1, static_cast<size_t>(sz), fp);
+        LONGS_EQUAL(static_cast<size_t>(sz), n);
+    }
+    fclose(fp);
+    return out;
+}
+
+} // namespace
 
 typedef struct {
     uint32_t key;
@@ -231,4 +254,95 @@ TEST(VeriObjC_TapeAndRelPtr, TapeFromBytesAndVerifyLinkRejectAllMutatedAndHostil
     int32_t valid_delta = (int32_t)((const uint8_t *)&nodes[1] - (const uint8_t *)&nodes[0].left32);
     nodes[0].left32.offset = valid_delta + 1; // +1 byte off element boundary!
     CHECK_FALSE(veriobjc_verify_rel32_link(&nodes[0].left32, nodes, payload_bytes, sizeof(RelNode)));
+}
+
+// Contract 5 (Task 5.6b): Dual-direction external VOBJ v1 golden corpus & per-byte mutation gate
+TEST(VeriObjC_TapeAndRelPtr, ExternalVobjV1GoldenCorpusAndDualDirectionMutationGate) {
+    constexpr uint16_t TAG_RELNODE = 0x1042u;
+    const size_t rel32_offsets[2] = { offsetof(RelNode, left32), offsetof(RelNode, right32) };
+
+    const char *accept_files[2] = {
+        "fixtures/vobj_v1/accept/relnode_3elem.bin",
+        "fixtures/vobj_v1/accept/external_order_book_2elem.bin"
+    };
+    const uint32_t expected_counts[2] = { 3u, 2u };
+
+    for (size_t f = 0; f < 2; ++f) {
+        std::vector<uint8_t> tape = load_vobj_fixture(accept_files[f]);
+        uint32_t cnt = 0u;
+        LONGS_EQUAL(
+            VERIOBJC_TAPE_OK,
+            veriobjc_tape_validate_v1(
+                tape.data(), tape.size(), TAG_RELNODE, sizeof(RelNode), rel32_offsets, 2, &cnt));
+        LONGS_EQUAL(expected_counts[f], cnt);
+
+        const RelNode *loaded = (const RelNode *)veriobjc_from_bytes(
+            tape.data(), tape.size(), TAG_RELNODE, sizeof(RelNode), &cnt);
+        CHECK(loaded != nullptr);
+
+        // Per-byte mutation invariant: every byte index 0..len-1 must flip accept -> reject
+        for (size_t i = 0; i < tape.size(); ++i) {
+            std::vector<uint8_t> mutated = tape;
+            mutated[i] ^= 0x01u;
+            LONGS_EQUAL(
+                VERIOBJC_TAPE_ERR_CHECKSUM,
+                veriobjc_tape_validate_v1(
+                    mutated.data(),
+                    mutated.size(),
+                    TAG_RELNODE,
+                    sizeof(RelNode),
+                    rel32_offsets,
+                    2,
+                    nullptr));
+            POINTERS_EQUAL(
+                nullptr,
+                veriobjc_from_bytes(
+                    mutated.data(), mutated.size(), TAG_RELNODE, sizeof(RelNode), nullptr));
+        }
+    }
+
+    struct RejectFixture {
+        const char *path;
+        veriobjc_tape_error_t expected_err;
+    };
+    const RejectFixture rejects[6] = {
+        {"fixtures/vobj_v1/reject/bad_magic.bin", VERIOBJC_TAPE_ERR_HEADER},
+        {"fixtures/vobj_v1/reject/bad_version.bin", VERIOBJC_TAPE_ERR_HEADER},
+        {"fixtures/vobj_v1/reject/payload_bytes_mismatch.bin", VERIOBJC_TAPE_ERR_PAYLOAD_SIZE},
+        {"fixtures/vobj_v1/reject/bad_checksum.bin", VERIOBJC_TAPE_ERR_CHECKSUM},
+        {"fixtures/vobj_v1/reject/unaligned_rel32_link.bin", VERIOBJC_TAPE_ERR_REL_LINK},
+        {"fixtures/vobj_v1/reject/out_of_bounds_rel32_link.bin", VERIOBJC_TAPE_ERR_REL_LINK},
+    };
+
+    for (size_t r = 0; r < 6; ++r) {
+        std::vector<uint8_t> bad = load_vobj_fixture(rejects[r].path);
+        LONGS_EQUAL(
+            rejects[r].expected_err,
+            veriobjc_tape_validate_v1(
+                bad.data(), bad.size(), TAG_RELNODE, sizeof(RelNode), rel32_offsets, 2, nullptr));
+    }
+
+    // Defensive edge branches for veriobjc_tape_validate_v1
+    std::vector<uint8_t> valid = load_vobj_fixture(accept_files[0]);
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED,
+        veriobjc_tape_validate_v1(nullptr, valid.size(), TAG_RELNODE, sizeof(RelNode), nullptr, 0, nullptr));
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED,
+        veriobjc_tape_validate_v1(valid.data(), 12, TAG_RELNODE, sizeof(RelNode), nullptr, 0, nullptr));
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED,
+        veriobjc_tape_validate_v1(valid.data(), valid.size(), TAG_RELNODE, 0, nullptr, 0, nullptr));
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_ERR_HEADER,
+        veriobjc_tape_validate_v1(valid.data(), valid.size(), 0x9999u, sizeof(RelNode), nullptr, 0, nullptr));
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_ERR_HEADER,
+        veriobjc_tape_validate_v1(valid.data(), valid.size(), TAG_RELNODE, 32, nullptr, 0, nullptr));
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_ERR_PAYLOAD_SIZE,
+        veriobjc_tape_validate_v1(valid.data(), valid.size() - 1, TAG_RELNODE, sizeof(RelNode), nullptr, 0, nullptr));
+    LONGS_EQUAL(
+        VERIOBJC_TAPE_OK,
+        veriobjc_tape_validate_v1(valid.data(), valid.size(), TAG_RELNODE, sizeof(RelNode), nullptr, 0, nullptr));
 }

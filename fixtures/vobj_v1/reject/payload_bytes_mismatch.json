@@ -1,0 +1,6 @@
+{
+  "fixture": "reject/payload_bytes_mismatch.bin",
+  "expected": "reject",
+  "error_code": "VERIOBJC_TAPE_ERR_PAYLOAD_SIZE",
+  "reason": "elem_size * elem_count (32) does not equal header payload_bytes (48)."
+}

@@ -1,0 +1,10 @@
+{
+  "fixture": "accept/relnode_3elem.bin",
+  "expected": "accept",
+  "error_code": "VERIOBJC_TAPE_OK",
+  "type_tag_hex": "0x1042",
+  "elem_size": 16,
+  "elem_count": 3,
+  "byte_length": 72,
+  "checksum_hex": "0x19dc56cc"
+}
