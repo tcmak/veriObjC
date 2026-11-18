@@ -325,12 +325,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Dual-direction corpus gate for external tapes: committed fixtures produced by external encoders must load clean and be rejected under mutation. CI runs the C loader only — **no producer toolchain (Julia or otherwise) is ever required in VeriObjC CI**.
   - *No longer blocks the other repos: TernaryTape.jl and the portfolio conformance work unblock on 5.6a; 5.6b is the final contract publication.*
 
-- [ ] **Task 5.7: veriStream Runtime Slice (`rt/vtpe_reader`, `rt/dispatch`, `rt/scheduler`)** *(Amendment 2 — rephaseable any time after 5.6a)*
-  - `rt/vtpe_reader`: tape parser implementing the §8 rejection contract, validated against the 5.6a golden tapes.
-  - `rt/dispatch`: backend dispatch abstraction with two initial backends — the setun accelerator (LiteX CSR/DMA via `AccelDriver`, Season 2–3) and the kit's HLS tile.
-  - `rt/scheduler`: map a tape's matmuls onto KERNEL_SPEC kernel invocations (tiling, buffer descriptors, invocation order).
-  - Host-side `fp32_aux` handling: embeddings/RMSNorm/softmax remain host-consumed, never hardware-visible (kit data-flow rule).
-  - **Acceptance:** "parse one Core-profile tape, run one matmul on the setun accelerator, return C, bit-exact vs golden" as a committed integration test.
+- [x] **Task 5.7: veriStream Runtime Slice (`rt/vtpe_reader`, `rt/dispatch`, `rt/scheduler`)** *(Amendment 2 — rephaseable any time after 5.6a)*
+  - `rt/vtpe_reader` (`rt/include/rt/vtpe_reader.h`): zero-copy tape parser implementing the §8 rejection contract via `vtpe_v1_validate_tape`, validated against the 5.6a golden tapes (`tests/unit_rt/TestVeriStreamRuntimeSlice.cpp`).
+  - `rt/dispatch` (`rt/include/rt/dispatch.h`): backend dispatch abstraction with two initial backends — the setun accelerator (LiteX CSR/DMA via `AccelDriver`, Season 2–3: `VTPE_BACKEND_SETUN_LITEX`) and the kit's HLS tile (`VTPE_BACKEND_KIT_HLS_TILE`).
+  - `rt/scheduler` (`rt/include/rt/scheduler.h`): maps a tape's layers onto `KERNEL_SPEC` kernel invocations (tiling, buffer descriptors, invocation order, and `is_hardware_visible` provenance).
+  - Host-side `fp32_aux` handling: embeddings/RMSNorm/softmax remain strictly host-consumed and never hardware-visible; attempting to bind any `fp32_aux` byte range to a hardware buffer descriptor fails closed with `VTPE_DISPATCH_ERR_HOST_ONLY_AUX_FORBIDDEN` (enforcing the kit data-flow rule).
+  - **Acceptance:** `"parse one Core-profile tape, run one matmul on the setun accelerator, return C, bit-exact vs golden"` verified in `TestVeriStreamRuntimeSlice.cpp` (plus bit-exact cross-backend check against `VTPE_BACKEND_KIT_HLS_TILE`) with 100.00% `llvm-cov` coverage.
 
 - [ ] **Task 5.8: Portfolio Golden-Tape Conformance Suite** *(Amendment 3 — VeriObjC owns it as format owner)*
   - The 5.6a golden tapes + a runner each backend must pass, wrapped in a portfolio-level CI job exercised against: setun's `ref/format.py` + RTL sim, the kit's M4.5 INT8 tape oracle, and TernaryTape.jl's reference interpreter.
