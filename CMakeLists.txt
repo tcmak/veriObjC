@@ -62,6 +62,7 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestVstdWave2And3.cpp
     tests/unit_rt/TestVstdWave4And5.cpp
     tests/unit_rt/TestVtpeV1GoldenCorpus.cpp
+    tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
 )
 
 target_compile_definitions(unit_rt_tests PRIVATE

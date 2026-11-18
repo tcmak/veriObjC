@@ -50,9 +50,13 @@ check_header_layer() {
 # 1. Layer 'rt': may import nothing from vstd, sys0, hw
 check_header_layer "$REPO_ROOT/rt/include/veriobjc_runtime.h" "rt" "(vstd/|sys0/|hw/)" \
     -I"$REPO_ROOT/rt/include"
+shopt -s nullglob
+for hdr in "$REPO_ROOT"/rt/include/rt/*.h; do
+    check_header_layer "$hdr" "rt" "(vstd/|sys0/|hw/)" \
+        -I"$REPO_ROOT/rt/include"
+done
 
 # 2. Layer 'vstd': may import rt and vstd ONLY (never sys0 or hw)
-shopt -s nullglob
 for hdr in "$REPO_ROOT"/vstd/include/vstd/*.h; do
     base=$(basename "$hdr")
     check_header_layer "$hdr" "vstd" "(sys0/|hw/)" \
