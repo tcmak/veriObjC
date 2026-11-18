@@ -332,9 +332,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Host-side `fp32_aux` handling: embeddings/RMSNorm/softmax remain strictly host-consumed and never hardware-visible; attempting to bind any `fp32_aux` byte range to a hardware buffer descriptor fails closed with `VTPE_DISPATCH_ERR_HOST_ONLY_AUX_FORBIDDEN` (enforcing the kit data-flow rule).
   - **Acceptance:** `"parse one Core-profile tape, run one matmul on the setun accelerator, return C, bit-exact vs golden"` verified in `TestVeriStreamRuntimeSlice.cpp` (plus bit-exact cross-backend check against `VTPE_BACKEND_KIT_HLS_TILE`) with 100.00% `llvm-cov` coverage.
 
-- [ ] **Task 5.8: Portfolio Golden-Tape Conformance Suite** *(Amendment 3 — VeriObjC owns it as format owner)*
-  - The 5.6a golden tapes + a runner each backend must pass, wrapped in a portfolio-level CI job exercised against: setun's `ref/format.py` + RTL sim, the kit's M4.5 INT8 tape oracle, and TernaryTape.jl's reference interpreter.
-  - **Acceptance:** one command reproduces all three consumption checks; failures name the repo and the violated clause. Closes the verification-bar gap (setun 6×10⁵ vectors vs kit 10 goldens) with a shared executable bar.
+- [x] **Task 5.8: Portfolio Golden-Tape Conformance Suite** *(Amendment 3 — VeriObjC owns it as format owner)*
+  - The 5.6a golden tapes (`12` tapes: `3 accept` + `9 reject`) + unified portfolio conformance runner (`rt/include/rt/portfolio_conformance.h`, `tests/unit_rt/TestPortfolioConformanceSuite.cpp`, and `tests/integration/run_portfolio_conformance_suite.sh`, CTest target `portfolio_conformance_tests`) exercised against all three portfolio consumers: `setun` (`VTPE_CONSUMER_SETUN_RTL_SIM`), `veriobjc-inference-appliance-kit` M4.5 INT8 tape oracle (`VTPE_CONSUMER_KIT_M45_INT8_ORACLE`, Core-only ADR-0002 profile gate), and `TernaryTape.jl`'s reference interpreter (`VTPE_CONSUMER_TERNARY_TAPE_JL`).
+  - **Acceptance:** one command (`tests/integration/run_portfolio_conformance_suite.sh`) reproduces all three consumption checks and verifies bit-exact oracle outputs; negative self-tests verify that failures explicitly name the failing repo (`repo=<name>`) and the exact violated specification clause (`clause=§...`), with 100.00% `llvm-cov` coverage.
 
 ---
 
