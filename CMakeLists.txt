@@ -63,6 +63,7 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestVstdWave4And5.cpp
     tests/unit_rt/TestVtpeV1GoldenCorpus.cpp
     tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
+    tests/unit_rt/TestPortfolioConformanceSuite.cpp
 )
 
 target_compile_definitions(unit_rt_tests PRIVATE
@@ -159,4 +160,9 @@ add_test(NAME ban_corpus_tests
 # Test target for Phase 3 Header Cohesion & Layer Table Gate
 add_test(NAME vstd_cohesion_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/check_vstd_cohesion.sh ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+# Test target for Task 5.8 Portfolio Golden-Tape Conformance Suite
+add_test(NAME portfolio_conformance_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_portfolio_conformance_suite.sh ${CMAKE_CURRENT_SOURCE_DIR}
 )
