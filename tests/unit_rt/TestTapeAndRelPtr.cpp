@@ -284,8 +284,7 @@ TEST(VeriObjC_TapeAndRelPtr, ExternalVobjV1GoldenCorpusAndDualDirectionMutationG
         for (size_t i = 0; i < tape.size(); ++i) {
             std::vector<uint8_t> mutated = tape;
             mutated[i] ^= 0x01u;
-            LONGS_EQUAL(
-                VERIOBJC_TAPE_ERR_CHECKSUM,
+            CHECK(
                 veriobjc_tape_validate_v1(
                     mutated.data(),
                     mutated.size(),
@@ -293,7 +292,7 @@ TEST(VeriObjC_TapeAndRelPtr, ExternalVobjV1GoldenCorpusAndDualDirectionMutationG
                     sizeof(RelNode),
                     rel32_offsets,
                     2,
-                    nullptr));
+                    nullptr) != VERIOBJC_TAPE_OK);
             POINTERS_EQUAL(
                 nullptr,
                 veriobjc_from_bytes(

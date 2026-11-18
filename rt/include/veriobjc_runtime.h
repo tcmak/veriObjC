@@ -913,14 +913,49 @@ static inline veriobjc_tape_error_t veriobjc_tape_validate_v1(
     const size_t *rel32_field_offsets,
     size_t num_rel32_fields,
     uint32_t *out_elem_count) {
-    (void)in_buf;
-    (void)in_len;
-    (void)expected_tag;
-    (void)expected_elem_size;
-    (void)rel32_field_offsets;
-    (void)num_rel32_fields;
-    (void)out_elem_count;
-    return VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED;
+    if (!in_buf || expected_elem_size == 0u || in_len < sizeof(struct veriobjc_tape_header)) {
+        return VERIOBJC_TAPE_ERR_NULL_OR_TRUNCATED;
+    }
+
+    struct veriobjc_tape_header hdr;
+    __builtin_memcpy(&hdr, in_buf, sizeof(hdr));
+
+    if (hdr.magic != VERIOBJC_TAPE_MAGIC ||
+        hdr.version != VERIOBJC_TAPE_VERSION ||
+        hdr.type_tag != expected_tag ||
+        hdr.elem_size != expected_elem_size) {
+        return VERIOBJC_TAPE_ERR_HEADER;
+    }
+
+    uint64_t expected_payload = (uint64_t)hdr.elem_size * (uint64_t)hdr.elem_count;
+    if (expected_payload != (uint64_t)hdr.payload_bytes ||
+        in_len - sizeof(struct veriobjc_tape_header) != (size_t)hdr.payload_bytes) {
+        return VERIOBJC_TAPE_ERR_PAYLOAD_SIZE;
+    }
+
+    const uint8_t *payload = (const uint8_t *)in_buf + sizeof(struct veriobjc_tape_header);
+    uint32_t computed_crc = veriobjc_tape_checksum(&hdr, payload, (size_t)hdr.payload_bytes);
+    if (computed_crc != hdr.checksum) {
+        return VERIOBJC_TAPE_ERR_CHECKSUM;
+    }
+
+    if (rel32_field_offsets) {
+        for (uint32_t i = 0u; i < hdr.elem_count; ++i) {
+            const uint8_t *rec = payload + (size_t)i * (size_t)hdr.elem_size;
+            for (size_t f = 0u; f < num_rel32_fields; ++f) {
+                const struct veriobjc_rel32 *lnk =
+                    (const struct veriobjc_rel32 *)(rec + rel32_field_offsets[f]);
+                if (!veriobjc_verify_rel32_link(lnk, payload, (size_t)hdr.payload_bytes, (size_t)hdr.elem_size)) {
+                    return VERIOBJC_TAPE_ERR_REL_LINK;
+                }
+            }
+        }
+    }
+
+    if (out_elem_count) {
+        *out_elem_count = hdr.elem_count;
+    }
+    return VERIOBJC_TAPE_OK;
 }
 
 // ---------------------------------------------------------------------------
