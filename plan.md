@@ -314,10 +314,10 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
     - One-store reset under heterogeneity: scope exit restores the stack top to the scope mark in **exactly one `movq`** despite mixed concrete sizes (`llvm-objdump` audit).
     - No escape: storing any upcast (superclass-typed) reference into an outer-scope destination fails with the reference-root diagnostic; all upcast references are dead at scope exit.
     - 100% region/function/branch coverage on the new paths (`llvm-cov`).
-- [ ] **Task 5.6a: VTPE v1 Format Freeze & Golden Tape Corpus (do first — portfolio-critical)**
+- [x] **Task 5.6a: VTPE v1 Format Freeze & Golden Tape Corpus (do first — portfolio-critical)**
   - *Amendment 1 (2026-11-18): 5.6 is split so the parts every other repo needs land first, without waiting for full `rt/` reconciliation.*
-  - Freeze the two-profile VTPE v1 contract as implemented by consumers: 32-byte header, FNV-1a-32 framing, flags bits (bit 2 = profile; unknown bits rejected with named diagnostics — kit ADR-0002), ternary section packing, and the §8 rejection contract.
-  - Publish 5–10 **golden VTPE tapes** (known-good parses, known-bad rejects, known outputs) as committed test fixtures, consumable cross-repo.
+  - Freeze the two-profile VTPE v1 contract as implemented by consumers (`docs/veriobjc-ternary-tape-format-specification-v1-proposal.md` + `vtpe_v1_validate_tape` in `rt/include/veriobjc_runtime.h`): 32-byte `"VTPE"` header, FNV-1a-32 framing over all 28 non-checksum header bytes, 64-bit FNV-1a `artifact_id` over framed sections, flags bits (bit 2 = profile `0=Core, 1=Extended`; bits 3–7 reserved and rejected with `VTPE_ERR_UNKNOWN_FLAGS` — kit ADR-0002), Extended-only host-consumed `0x0006` (`fp32_aux`) section, ternary section packing, and the §8 rejection contract.
+  - Published **12 golden VTPE tapes** (`3 accept` + `9 reject`, each `.bin` paired with a `.json` expectation sidecar) under `fixtures/vtpe_v1/{accept,reject}/`, verified by `tests/unit_rt/TestVtpeV1GoldenCorpus.cpp` with exhaustive per-byte mutation sweeps and 100.00% `llvm-cov` coverage.
   - **Priority:** 5.6a outranks Task 3.3c — 3.3c gates Phase 4 benchmarks, but 5.6a gates every cross-repo artifact (Task 5.7 runtime slice, Task 5.8 conformance suite, kit M4.5 INT8 tape oracle, setun loader migration, TernaryTape.jl unblock).
 - [ ] **Task 5.6b: Tape Format Specification v1 — Full `rt/` Reconciliation & Publication**
   - Full original Task 5.6 scope: extract the `veriobjc_to_bytes` / `veriobjc_from_bytes` framing, checksum, and self-relative link rules into a versioned, byte-exact spec (`docs/veriobjc-tape-format.md`) regenerated from the implementation — `rt/` is authoritative.

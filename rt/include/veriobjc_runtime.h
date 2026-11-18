@@ -964,15 +964,383 @@ struct __attribute__((packed)) vtpe_v1_section_header {
     uint32_t payload_fnv1a;
 };
 
+struct __attribute__((packed)) vtpe_v1_arch_layer {
+    uint16_t layer_kind;
+    uint16_t dim_in;
+    uint16_t dim_out;
+    uint8_t  reduce_stages;
+    uint8_t  reserved;
+    uint32_t latency_cycles;
+    uint32_t context_cap;
+};
+
+struct __attribute__((packed)) vtpe_v1_fp32_aux_record {
+    uint16_t layer_index;
+    uint8_t  aux_role;
+    uint8_t  reserved;
+    uint32_t elem_count;
+};
+
+static inline uint32_t vtpe_v1_fnv1a32(const uint8_t *data, size_t len) {
+    uint32_t h = 0x811c9dc5u;
+    for (size_t i = 0u; i < len; ++i) {
+        h ^= (uint32_t)data[i];
+        h *= 0x01000193u;
+    }
+    return h;
+}
+
+static inline uint64_t vtpe_v1_fnv1a64(const uint8_t *data, size_t len) {
+    uint64_t h = 0xcbf29ce484222325ULL;
+    for (size_t i = 0u; i < len; ++i) {
+        h ^= (uint64_t)data[i];
+        h *= 0x100000001b3ULL;
+    }
+    return h;
+}
+
+static inline uint32_t vtpe_v1_header_fnv1a32(const uint8_t *hdr_bytes) {
+    uint8_t buf[28];
+    __builtin_memcpy(buf, hdr_bytes, 12u);
+    __builtin_memcpy(buf + 12u, hdr_bytes + 16u, 16u);
+    return vtpe_v1_fnv1a32(buf, sizeof(buf));
+}
+
+static inline uint8_t vtpe_v1_clog2_u16(uint16_t n) {
+    uint8_t stages = 0u;
+    uint32_t span = 1u;
+    while (span < (uint32_t)n) {
+        span <<= 1u;
+        stages++;
+    }
+    return stages;
+}
+
+static inline vtpe_v1_error_t vtpe_v1_validate_arch_weights_scales(
+    bool is_extended_tape,
+    const uint8_t *arch_ptr,
+    uint32_t arch_len,
+    const uint8_t *weights_ptr,
+    uint32_t weights_len,
+    const uint8_t *scales_ptr,
+    uint32_t scales_len,
+    uint16_t *out_n_layers
+) {
+    if (arch_len < 4u) {
+        return VTPE_ERR_MALFORMED_ARCH;
+    }
+    uint16_t n_layers = 0u;
+    uint16_t arch_res = 0u;
+    __builtin_memcpy(&n_layers, arch_ptr, 2u);
+    __builtin_memcpy(&arch_res, arch_ptr + 2u, 2u);
+    if (arch_res != 0u) {
+        return VTPE_ERR_NONZERO_RESERVED;
+    }
+    if (n_layers == 0u || arch_len != 4u + 16u * (uint32_t)n_layers) {
+        return VTPE_ERR_MALFORMED_ARCH;
+    }
+
+    uint32_t expected_weight_bytes = 0u;
+    uint32_t num_dense_layers = 0u;
+    for (uint16_t i = 0u; i < n_layers; ++i) {
+        struct vtpe_v1_arch_layer layer;
+        __builtin_memcpy(&layer, arch_ptr + 4u + 16u * (uint32_t)i, sizeof(layer));
+        if (layer.reserved != 0u) {
+            return VTPE_ERR_NONZERO_RESERVED;
+        }
+        if (layer.layer_kind < 1u || layer.layer_kind > 7u ||
+            layer.dim_in == 0u || layer.dim_out == 0u || layer.context_cap == 0u) {
+            return VTPE_ERR_MALFORMED_ARCH;
+        }
+        if (!is_extended_tape && layer.layer_kind >= 6u) {
+            return VTPE_ERR_PROFILE_SECTION_FORBIDDEN;
+        }
+        if (layer.layer_kind == 4u) {
+            uint8_t exp_stages = vtpe_v1_clog2_u16(layer.dim_in);
+            if (layer.reduce_stages != exp_stages || layer.latency_cycles < (uint32_t)exp_stages) {
+                return VTPE_ERR_MALFORMED_ARCH;
+            }
+            expected_weight_bytes += (uint32_t)layer.dim_out * (((uint32_t)layer.dim_in + 3u) / 4u);
+            num_dense_layers++;
+        } else if (layer.reduce_stages != 0u) {
+            return VTPE_ERR_MALFORMED_ARCH;
+        }
+    }
+
+    if (num_dense_layers == 0u ||
+        weights_len != expected_weight_bytes ||
+        scales_len != 2u * num_dense_layers) {
+        return VTPE_ERR_DIM_PAYLOAD_MISMATCH;
+    }
+
+    uint32_t w_off = 0u;
+    for (uint16_t i = 0u; i < n_layers; ++i) {
+        struct vtpe_v1_arch_layer layer;
+        __builtin_memcpy(&layer, arch_ptr + 4u + 16u * (uint32_t)i, sizeof(layer));
+        if (layer.layer_kind != 4u) {
+            continue;
+        }
+        uint32_t row_bytes = ((uint32_t)layer.dim_in + 3u) / 4u;
+        uint32_t total_lanes = row_bytes * 4u;
+        for (uint16_t r = 0u; r < layer.dim_out; ++r) {
+            for (uint32_t c = 0u; c < total_lanes; ++c) {
+                uint8_t b = weights_ptr[w_off + (c >> 2u)];
+                uint8_t code = (uint8_t)((b >> ((c & 3u) * 2u)) & 0x03u);
+                if (c < (uint32_t)layer.dim_in) {
+                    if (code == 0x03u) {
+                        return VTPE_ERR_RESERVED_TERNARY_CODE;
+                    }
+                } else if (code != 0x00u) {
+                    return VTPE_ERR_NONZERO_PADDING;
+                }
+            }
+            w_off += row_bytes;
+        }
+    }
+
+    for (uint32_t s = 0u; s < num_dense_layers; ++s) {
+        int16_t exp_val = 0;
+        __builtin_memcpy(&exp_val, scales_ptr + 2u * s, 2u);
+        if (exp_val < -30 || exp_val > 30) {
+            return VTPE_ERR_INVALID_SCALE;
+        }
+    }
+
+    *out_n_layers = n_layers;
+    return VTPE_OK;
+}
+
+static inline vtpe_v1_error_t vtpe_v1_validate_manifest(const uint8_t *m_ptr, uint32_t m_len) {
+    uint32_t m_off = 0u;
+    for (uint32_t f = 0u; f < 5u; ++f) {
+        if (m_len - m_off < 2u) {
+            return VTPE_ERR_MALFORMED_MANIFEST;
+        }
+        uint16_t flen = 0u;
+        __builtin_memcpy(&flen, m_ptr + m_off, 2u);
+        if (flen == 0u || (uint32_t)flen > m_len - m_off - 2u ||
+            (f == 1u && flen != 32u) || (f == 4u && flen < 8u)) {
+            return VTPE_ERR_MALFORMED_MANIFEST;
+        }
+        m_off += 2u + (uint32_t)flen;
+    }
+    return (m_off == m_len) ? VTPE_OK : VTPE_ERR_MALFORMED_MANIFEST;
+}
+
+static inline vtpe_v1_error_t vtpe_v1_validate_links(const uint8_t *l_ptr, uint32_t l_len) {
+    if (l_len == 0u || (l_len & 3u) != 0u) {
+        return VTPE_ERR_INVALID_LINK;
+    }
+    for (uint32_t off = 0u; off < l_len; off += 4u) {
+        int32_t delta = 0;
+        __builtin_memcpy(&delta, l_ptr + off, 4u);
+        int64_t target = (int64_t)off + (int64_t)delta;
+        if (delta == 0 || ((uint32_t)delta & 3u) != 0u || target < 0 || target >= (int64_t)l_len) {
+            return VTPE_ERR_INVALID_LINK;
+        }
+    }
+    return VTPE_OK;
+}
+
+static inline vtpe_v1_error_t vtpe_v1_validate_fp32_aux(
+    const uint8_t *a_ptr,
+    uint32_t a_len,
+    const uint8_t *arch_ptr,
+    uint16_t n_layers
+) {
+    if (a_len < 4u) {
+        return VTPE_ERR_MALFORMED_FP32_AUX;
+    }
+    uint16_t tensor_count = 0u;
+    uint16_t aux_res = 0u;
+    __builtin_memcpy(&tensor_count, a_ptr, 2u);
+    __builtin_memcpy(&aux_res, a_ptr + 2u, 2u);
+    if (aux_res != 0u) {
+        return VTPE_ERR_NONZERO_RESERVED;
+    }
+    if (tensor_count == 0u) {
+        return VTPE_ERR_MALFORMED_FP32_AUX;
+    }
+
+    uint32_t a_off = 4u;
+    for (uint16_t t = 0u; t < tensor_count; ++t) {
+        if (a_len - a_off < sizeof(struct vtpe_v1_fp32_aux_record)) {
+            return VTPE_ERR_MALFORMED_FP32_AUX;
+        }
+        struct vtpe_v1_fp32_aux_record rec;
+        __builtin_memcpy(&rec, a_ptr + a_off, sizeof(rec));
+        if (rec.reserved != 0u) {
+            return VTPE_ERR_NONZERO_RESERVED;
+        }
+        if (rec.layer_index >= n_layers || rec.aux_role < 1u || rec.aux_role > 3u ||
+            rec.elem_count > (a_len - a_off - 8u) / 4u) {
+            return VTPE_ERR_MALFORMED_FP32_AUX;
+        }
+
+        struct vtpe_v1_arch_layer layer;
+        __builtin_memcpy(&layer, arch_ptr + 4u + 16u * (uint32_t)rec.layer_index, sizeof(layer));
+        uint16_t exp_kind = (rec.aux_role == 1u) ? 6u : ((rec.aux_role == 2u) ? 3u : 7u);
+        uint32_t exp_elems = (rec.aux_role == 1u)
+            ? ((uint32_t)layer.dim_in * (uint32_t)layer.dim_out)
+            : ((rec.aux_role == 2u) ? (uint32_t)layer.dim_in : (uint32_t)layer.dim_out);
+        if (layer.layer_kind != exp_kind || rec.elem_count != exp_elems) {
+            return VTPE_ERR_MALFORMED_FP32_AUX;
+        }
+
+        const uint8_t *vals_ptr = a_ptr + a_off + 8u;
+        for (uint32_t k = 0u; k < rec.elem_count; ++k) {
+            uint32_t word = 0u;
+            __builtin_memcpy(&word, vals_ptr + 4u * k, 4u);
+            if ((word & 0x7F800000u) == 0x7F800000u) {
+                return VTPE_ERR_MALFORMED_FP32_AUX;
+            }
+        }
+        a_off += 8u + rec.elem_count * 4u;
+    }
+    return (a_off == a_len) ? VTPE_OK : VTPE_ERR_MALFORMED_FP32_AUX;
+}
+
 static inline vtpe_v1_error_t vtpe_v1_validate_tape(
     const void *in_buf,
     size_t in_len,
     vtpe_v1_profile_t reader_profile
 ) {
-    (void)in_buf;
-    (void)in_len;
-    (void)reader_profile;
-    return VTPE_ERR_BAD_MAGIC; // Red stub prior to Task 5.6a Green implementation
+    if (!in_buf || in_len < sizeof(struct vtpe_v1_header)) {
+        return VTPE_ERR_NULL_OR_TRUNCATED;
+    }
+
+    const uint8_t *base = (const uint8_t *)in_buf;
+    struct vtpe_v1_header hdr;
+    __builtin_memcpy(&hdr, base, sizeof(hdr));
+
+    if (hdr.magic != VTPE_V1_MAGIC) {
+        return VTPE_ERR_BAD_MAGIC;
+    }
+    if (hdr.version_major != VTPE_V1_VERSION_MAJOR) {
+        return VTPE_ERR_UNSUPPORTED_VERSION;
+    }
+
+    uint8_t res_or = 0u;
+    for (size_t i = 0u; i < 8u; ++i) {
+        res_or |= hdr.reserved[i];
+    }
+    if (res_or != 0u) {
+        return VTPE_ERR_NONZERO_RESERVED;
+    }
+
+    if (vtpe_v1_header_fnv1a32(base) != hdr.header_fnv1a) {
+        return VTPE_ERR_CHECKSUM_MISMATCH;
+    }
+    if ((hdr.flags & VTPE_V1_FLAG_RESERVED) != 0u) {
+        return VTPE_ERR_UNKNOWN_FLAGS;
+    }
+
+    bool is_extended_tape = ((hdr.flags & VTPE_V1_FLAG_EXTENDED) != 0u);
+    if (reader_profile == VTPE_PROFILE_CORE && is_extended_tape) {
+        return VTPE_ERR_UNSUPPORTED_PROFILE;
+    }
+    if (hdr.section_count < 3u) {
+        return VTPE_ERR_SECTION_COUNT_MISMATCH;
+    }
+    if (in_len - sizeof(struct vtpe_v1_header) != (size_t)hdr.total_length) {
+        return VTPE_ERR_LENGTH_MISMATCH;
+    }
+
+    const uint8_t *sec_base = base + sizeof(struct vtpe_v1_header);
+    if (vtpe_v1_fnv1a64(sec_base, (size_t)hdr.total_length) != hdr.artifact_id) {
+        return VTPE_ERR_ARTIFACT_ID_MISMATCH;
+    }
+
+    const uint8_t *sec_ptr[7] = {NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+    uint32_t sec_len[7] = {0u, 0u, 0u, 0u, 0u, 0u, 0u};
+    size_t offset = 0u;
+
+    for (uint8_t s = 0u; s < hdr.section_count; ++s) {
+        if ((size_t)hdr.total_length - offset < sizeof(struct vtpe_v1_section_header)) {
+            return VTPE_ERR_LENGTH_MISMATCH;
+        }
+        struct vtpe_v1_section_header sh;
+        __builtin_memcpy(&sh, sec_base + offset, sizeof(sh));
+        if (sh.reserved != 0u) {
+            return VTPE_ERR_NONZERO_RESERVED;
+        }
+        size_t rem = (size_t)hdr.total_length - offset - sizeof(struct vtpe_v1_section_header);
+        if ((size_t)sh.length > rem) {
+            return VTPE_ERR_LENGTH_MISMATCH;
+        }
+        const uint8_t *payload = sec_base + offset + sizeof(struct vtpe_v1_section_header);
+        if (vtpe_v1_fnv1a32(payload, (size_t)sh.length) != sh.payload_fnv1a) {
+            return VTPE_ERR_CHECKSUM_MISMATCH;
+        }
+        if (sh.tag < VTPE_V1_TAG_WEIGHTS || sh.tag > VTPE_V1_TAG_FP32_AUX) {
+            return VTPE_ERR_UNKNOWN_TAG;
+        }
+        if (sec_ptr[sh.tag] != NULL) {
+            return VTPE_ERR_DUPLICATE_TAG;
+        }
+        if (sh.tag == VTPE_V1_TAG_FP32_AUX && !is_extended_tape) {
+            return VTPE_ERR_PROFILE_SECTION_FORBIDDEN;
+        }
+        sec_ptr[sh.tag] = payload;
+        sec_len[sh.tag] = sh.length;
+        offset += sizeof(struct vtpe_v1_section_header) + (size_t)sh.length;
+    }
+
+    if (offset != (size_t)hdr.total_length) {
+        return VTPE_ERR_LENGTH_MISMATCH;
+    }
+
+    bool has_base = (sec_ptr[VTPE_V1_TAG_WEIGHTS] != NULL) &&
+                    (sec_ptr[VTPE_V1_TAG_SCALES] != NULL) &&
+                    (sec_ptr[VTPE_V1_TAG_ARCH_DESCRIPTOR] != NULL);
+    bool manifest_ok = (((hdr.flags & VTPE_V1_FLAG_MANIFEST) != 0u) == (sec_ptr[VTPE_V1_TAG_MANIFEST] != NULL));
+    bool links_ok = (((hdr.flags & VTPE_V1_FLAG_LINKS) != 0u) == (sec_ptr[VTPE_V1_TAG_LINK_TABLE] != NULL));
+    bool ext_ok = (!is_extended_tape || (sec_ptr[VTPE_V1_TAG_FP32_AUX] != NULL));
+    if (!has_base || !manifest_ok || !links_ok || !ext_ok) {
+        return VTPE_ERR_MISSING_REQUIRED_SECTION;
+    }
+
+    uint16_t n_layers = 0u;
+    vtpe_v1_error_t arch_err = vtpe_v1_validate_arch_weights_scales(
+        is_extended_tape,
+        sec_ptr[VTPE_V1_TAG_ARCH_DESCRIPTOR], sec_len[VTPE_V1_TAG_ARCH_DESCRIPTOR],
+        sec_ptr[VTPE_V1_TAG_WEIGHTS], sec_len[VTPE_V1_TAG_WEIGHTS],
+        sec_ptr[VTPE_V1_TAG_SCALES], sec_len[VTPE_V1_TAG_SCALES],
+        &n_layers
+    );
+    if (arch_err != VTPE_OK) {
+        return arch_err;
+    }
+
+    if (sec_ptr[VTPE_V1_TAG_MANIFEST] != NULL) {
+        vtpe_v1_error_t man_err = vtpe_v1_validate_manifest(
+            sec_ptr[VTPE_V1_TAG_MANIFEST], sec_len[VTPE_V1_TAG_MANIFEST]
+        );
+        if (man_err != VTPE_OK) {
+            return man_err;
+        }
+    }
+
+    if (sec_ptr[VTPE_V1_TAG_LINK_TABLE] != NULL) {
+        vtpe_v1_error_t link_err = vtpe_v1_validate_links(
+            sec_ptr[VTPE_V1_TAG_LINK_TABLE], sec_len[VTPE_V1_TAG_LINK_TABLE]
+        );
+        if (link_err != VTPE_OK) {
+            return link_err;
+        }
+    }
+
+    if (sec_ptr[VTPE_V1_TAG_FP32_AUX] != NULL) {
+        vtpe_v1_error_t aux_err = vtpe_v1_validate_fp32_aux(
+            sec_ptr[VTPE_V1_TAG_FP32_AUX], sec_len[VTPE_V1_TAG_FP32_AUX],
+            sec_ptr[VTPE_V1_TAG_ARCH_DESCRIPTOR], n_layers
+        );
+        if (aux_err != VTPE_OK) {
+            return aux_err;
+        }
+    }
+
+    return VTPE_OK;
 }
 
 #ifdef __cplusplus
