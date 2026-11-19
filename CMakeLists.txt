@@ -64,6 +64,7 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestVtpeV1GoldenCorpus.cpp
     tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
     tests/unit_rt/TestPortfolioConformanceSuite.cpp
+    tests/unit_rt/TestBenchHarness.cpp
 )
 
 target_compile_definitions(unit_rt_tests PRIVATE
