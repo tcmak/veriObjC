@@ -280,8 +280,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - `--mono-report`: monomorphization byte budget and instantiation tracking.
   - `--hw-report`: per-kernel fabric resource audit (LUTs/FFs/BRAMs/DSPs) with the zero-DSP synthesis gate; *Amendment 4:* emits `VTPEProfile: core | DSPMode: zero-dsp`.
   - Survivor report diff engine (`rt_survivor_diff_audit` in `<rt/survivor_report.h>`, verified in `tests/unit_rt/TestSurvivorReport.cpp` with 100.00% `llvm-cov` coverage) rejecting new `@alloc` effects, surviving effect growth, new unproven branches, monomorphization regressions, and non-zero DSP blocks.
-- [ ] **Task 4.3: Latency Budget Gates**
-  - CI budget check: p50/p99 regression beyond noise band fails build.
+- [x] **Task 4.3: Latency Budget Gates**
+  - CI budget check (`rt_latency_gate_check` in `<rt/latency_gate.h>`, verified in `tests/unit_rt/TestLatencyBudgetGate.cpp` with 100.00% `llvm-cov` coverage): p50/p99/p99.9/teardown regression beyond `noise_band_cycles` fails closed naming the offending benchmark (`bench=<id>`) and commit (`commit=<sha>`).
 - [ ] **Task 4.4: Formal Math Proof Integration (SMACK / Z3)**
   - Extraction of `@pre` and `@post` boundary equations into SMT solver assertions.
 
