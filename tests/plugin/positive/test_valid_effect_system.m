@@ -18,9 +18,17 @@ uint32_t compute_checksum(uint32_t a, uint32_t b) {
 
 veriobjc_nolatency
 uint32_t fast_ring_publish(uint64_t *slot, uint32_t a, uint32_t b) {
-    uint32_t crc = compute_checksum(a, b);
-    hw_store_fence(slot, (uint64_t)crc);
-    return crc;
+    if (1) {
+        uint32_t crc = compute_checksum(a, b);
+        if (__builtin_expect(a > 0u, 1)) {
+            hw_store_fence(slot, (uint64_t)crc);
+        }
+        if (a == b) {
+            return crc ^ 1u;
+        }
+        return crc;
+    }
+    return 0u;
 }
 
 veriobjc_cold

@@ -67,6 +67,11 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             echo "$HW_OUT"
             exit 1
         fi
+        if ! echo "$HW_OUT" | grep -q "VTPEProfile: core | DSPMode: zero-dsp"; then
+            echo "[FAIL] Expected --hw-report to include Amendment 4 VTPEProfile and DSPMode fields in test_valid_ternary_dot.m!"
+            echo "$HW_OUT"
+            exit 1
+        fi
     fi
     if [[ "$(basename "$pos_file")" == "test_valid_effect_system.m" ]]; then
         EFF_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --effects-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
@@ -78,6 +83,12 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
         if ! echo "$EFF_OUT" | grep -q "Function: cold_audit_entry | .*@io (cold_diag_log)"; then
             echo "[FAIL] Expected --effects-report to list surviving @io (cold_diag_log) in cold_audit_entry!"
             echo "$EFF_OUT"
+            exit 1
+        fi
+        BR_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --branch-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$BR_OUT" | grep -q "Function: fast_ring_publish | Proven: 1 | Hinted: 1 | Unproven: 1"; then
+            echo "[FAIL] Expected --branch-report to classify Proven: 1 | Hinted: 1 | Unproven: 1 in fast_ring_publish!"
+            echo "$BR_OUT"
             exit 1
         fi
     fi
