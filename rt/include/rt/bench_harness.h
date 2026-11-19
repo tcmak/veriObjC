@@ -34,7 +34,14 @@ struct rt_bench_m6_record {
 };
 
 static inline uint64_t rt_bench_read_cycles(void) {
-    return 0u;
+#if defined(__x86_64__) || defined(__i386__)
+    uint32_t lo = 0u;
+    uint32_t hi = 0u;
+    __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32u) | (uint64_t)lo;
+#else
+    return __builtin_readcyclecounter();
+#endif
 }
 
 static inline int rt_bench_compute_stats(
@@ -42,26 +49,118 @@ static inline int rt_bench_compute_stats(
     size_t count,
     uint64_t teardown_cycles,
     struct rt_bench_stats *out_stats) {
-    (void)samples;
-    (void)count;
-    (void)teardown_cycles;
-    (void)out_stats;
-    return 0;
+    if (!samples || count == 0u || !out_stats) {
+        return 0;
+    }
+
+    for (size_t i = 1u; i < count; ++i) {
+        uint64_t key = samples[i];
+        size_t j = i;
+        while (j > 0u && samples[j - 1u] > key) {
+            samples[j] = samples[j - 1u];
+            j--;
+        }
+        samples[j] = key;
+    }
+
+    size_t idx50 = ((count - 1u) * 50u) / 100u;
+    size_t idx99 = ((count - 1u) * 99u + 99u) / 100u;
+    size_t idx999 = ((count - 1u) * 999u + 999u) / 1000u;
+
+    out_stats->min_cycles = samples[0];
+    out_stats->p50_cycles = samples[idx50];
+    out_stats->p99_cycles = samples[idx99];
+    out_stats->p999_cycles = samples[idx999];
+    out_stats->max_cycles = samples[count - 1u];
+    out_stats->teardown_cycles = teardown_cycles;
+    return 1;
 }
 
 static inline int rt_bench_validate_m6_record(const struct rt_bench_m6_record *rec) {
-    (void)rec;
-    return 0;
+    if (!rec || !rec->bench_id || rec->bench_id[0] == '\0') {
+        return 0;
+    }
+    if (rec->shape_m == 0u || rec->shape_n == 0u || rec->shape_k == 0u) {
+        return 0;
+    }
+    if (!rec->cited_baseline || rec->cited_baseline[0] == '\0') {
+        return 0;
+    }
+    if (rec->dollar_norm_cents == 0u) {
+        return 0;
+    }
+    if (rec->vtpe_profile != VTPE_PROFILE_CORE && rec->vtpe_profile != VTPE_PROFILE_EXTENDED) {
+        return 0;
+    }
+    if (rec->dsp_mode != RT_BENCH_DSP_ZERO && rec->dsp_mode != RT_BENCH_DSP_ENABLED) {
+        return 0;
+    }
+    if (rec->stats.p50_cycles == 0u || rec->stats.p99_cycles < rec->stats.p50_cycles) {
+        return 0;
+    }
+    return 1;
+}
+
+static inline size_t rt_bench_append_str(char *dst, size_t pos, const char *s) {
+    while (*s != '\0') {
+        dst[pos++] = *s++;
+    }
+    return pos;
+}
+
+static inline size_t rt_bench_append_u64(char *dst, size_t pos, uint64_t val) {
+    char rev[24];
+    size_t n = 0u;
+    uint64_t v = val;
+    do {
+        rev[n++] = (char)('0' + (v % 10u));
+        v /= 10u;
+    } while (v > 0u);
+    while (n > 0u) {
+        dst[pos++] = rev[--n];
+    }
+    return pos;
 }
 
 static inline int rt_bench_format_m6_line(
     const struct rt_bench_m6_record *rec,
     char *out_buf,
     size_t out_cap) {
-    (void)rec;
-    (void)out_buf;
-    (void)out_cap;
-    return 0;
+    if (!out_buf || out_cap < 160u || !rt_bench_validate_m6_record(rec)) {
+        return 0;
+    }
+    const char *prof_str =
+        (rec->vtpe_profile == VTPE_PROFILE_EXTENDED) ? "extended" : "core";
+    const char *dsp_str =
+        (rec->dsp_mode == RT_BENCH_DSP_ENABLED) ? "dsp-enabled" : "zero-dsp";
+
+    size_t p = 0u;
+    p = rt_bench_append_str(out_buf, p, "bench_id=");
+    p = rt_bench_append_str(out_buf, p, rec->bench_id);
+    p = rt_bench_append_str(out_buf, p, " shape=");
+    p = rt_bench_append_u64(out_buf, p, rec->shape_m);
+    p = rt_bench_append_str(out_buf, p, "x");
+    p = rt_bench_append_u64(out_buf, p, rec->shape_n);
+    p = rt_bench_append_str(out_buf, p, "x");
+    p = rt_bench_append_u64(out_buf, p, rec->shape_k);
+    p = rt_bench_append_str(out_buf, p, " baseline=");
+    p = rt_bench_append_str(out_buf, p, rec->cited_baseline);
+    p = rt_bench_append_str(out_buf, p, " dollar_cents=");
+    p = rt_bench_append_u64(out_buf, p, rec->dollar_norm_cents);
+    p = rt_bench_append_str(out_buf, p, " vtpe_profile=");
+    p = rt_bench_append_str(out_buf, p, prof_str);
+    p = rt_bench_append_str(out_buf, p, " dsp_mode=");
+    p = rt_bench_append_str(out_buf, p, dsp_str);
+    p = rt_bench_append_str(out_buf, p, " p50=");
+    p = rt_bench_append_u64(out_buf, p, rec->stats.p50_cycles);
+    p = rt_bench_append_str(out_buf, p, " p99=");
+    p = rt_bench_append_u64(out_buf, p, rec->stats.p99_cycles);
+    p = rt_bench_append_str(out_buf, p, " p999=");
+    p = rt_bench_append_u64(out_buf, p, rec->stats.p999_cycles);
+    p = rt_bench_append_str(out_buf, p, " teardown=");
+    p = rt_bench_append_u64(out_buf, p, rec->stats.teardown_cycles);
+    out_buf[p] = '\0';
+    return 1;
 }
 
 #ifdef __cplusplus

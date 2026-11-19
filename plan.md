@@ -271,9 +271,9 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ## 📊 Phase 4: Measurement, Latency CI & Verification ("No Number, No Claim")
 *(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 3)*
 
-- [ ] **Task 4.1: Cycle-Accurate Microbenchmark Harness**
-  - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0`) on isolated cores.
-  - *Amendment 4 (2026-11-18):* benchmark reporting adopts the kit's M6 methodology (fixed shapes, cited baselines, $-normalization, VTPE profile + DSP mode named on every number) — no second protocol is invented here.
+- [x] **Task 4.1: Cycle-Accurate Microbenchmark Harness**
+  - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0` via `rt_bench_read_cycles` in `<rt/bench_harness.h>`) and deterministic p50/p99/p99.9 + teardown cycle extraction (`rt_bench_compute_stats`) benchmarking unified `vvector<T, N>` containers directly (`tests/unit_rt/TestBenchHarness.cpp`).
+  - *Amendment 4 (2026-11-18):* benchmark reporting adopts the kit's M6 methodology (`rt_bench_validate_m6_record`, `rt_bench_format_m6_line`: fixed non-zero `M×N×K` shapes, cited baselines, $-normalization in cents, `vtpe_profile=core|extended`, and `dsp_mode=zero-dsp|dsp-enabled` named on every number) with 100.00% `llvm-cov` coverage.
 - [ ] **Task 4.2: Survivor Reports as Build Artifacts**
   - `--effects-report`: per-line survivor report of effectful call sites.
   - `--branch-report`: classification of unproven data-dependent branches.
