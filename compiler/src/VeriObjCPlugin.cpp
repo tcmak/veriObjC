@@ -39,6 +39,7 @@ struct VeriObjCPluginOptions {
     bool EmitBranchReport = false;
     bool EmitMonoReport = false;
     bool EmitExportHeader = false;
+    bool EmitSmtReport = false;
 };
 
 struct CompiledDFA {
@@ -1727,16 +1728,25 @@ private:
                 return;
             }
         }
-        if (!Opts.EmitExportHeader) return;
-
+        llvm::StringRef PreExpr = "true";
+        llvm::StringRef PostExpr = "true";
         for (const auto *A : D->specific_attrs<AnnotateAttr>()) {
             llvm::StringRef Ann = A->getAnnotation();
             if (Ann.starts_with("objc_pre:")) {
-                llvm::errs() << "// @pre(" << Ann.drop_front(9) << ")\n";
+                PreExpr = Ann.drop_front(9);
+                if (Opts.EmitExportHeader) llvm::errs() << "// @pre(" << PreExpr << ")\n";
             } else if (Ann.starts_with("objc_post:")) {
-                llvm::errs() << "// @post(" << Ann.drop_front(10) << ")\n";
+                PostExpr = Ann.drop_front(10);
+                if (Opts.EmitExportHeader) llvm::errs() << "// @post(" << PostExpr << ")\n";
             }
         }
+        if (Opts.EmitSmtReport) {
+            llvm::errs() << "[VeriObjC --smt-report] Function: " << D->getName()
+                         << " | Pre: (assert (" << PreExpr << "))"
+                         << " | Post: (assert (not (" << PostExpr << ")))"
+                         << " | Solver: (check-sat)\n";
+        }
+        if (!Opts.EmitExportHeader) return;
         llvm::errs() << "extern " << D->getReturnType().getAsString() << " " << D->getName() << "(";
         for (unsigned i = 0; i < D->getNumParams(); ++i) {
             if (i > 0) llvm::errs() << ", ";
@@ -2743,6 +2753,7 @@ protected:
             else if (A == "--branch-report") Opts.EmitBranchReport = true;
             else if (A == "--mono-report") Opts.EmitMonoReport = true;
             else if (A == "--export-header-stdout") Opts.EmitExportHeader = true;
+            else if (A == "--smt-report") Opts.EmitSmtReport = true;
         }
         return true;
     }
