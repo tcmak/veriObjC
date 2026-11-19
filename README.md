@@ -112,7 +112,8 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | Area | State |
 | :--- | :--- |
 | **Phases 0–2** (toolchain, micro-runtime, Clang plugin: bans, devirtualization, lowering, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` elaboration, ban corpus ) | ✅ Complete — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov` |
-| **Phases 3–6** (vstd incl. device I/O, SIMD, contracts; latency CI, verification harness (SMACK/Z3), `vpm` & manifest, FPGA zero-DSP gate) | ⬜ Planned |
+| **Phases 3–5** (vstd incl. device I/O, SIMD, contracts; latency CI, verification harness (SMACK/Z3), `vpm` & manifest, FPGA zero-DSP gate) | ✅  Complete |
+| **Phases 6** (`vpm` & manifest) | ⬜ Planned |
 | **Toolchain** | Clang / LLVM 23.1.5, CppUTest, CMake |
 | **Production usage** | None. This is a research bet that the *impossible list* is worth the closed world. |
 
