@@ -2195,9 +2195,62 @@ public:
         return true;
     }
 
+    void checkInterfaceByValueRecord(const RecordDecl *D, SourceLocation Loc) {
+        if (!D) return;
+        for (const auto *Ann : D->specific_attrs<AnnotateAttr>()) {
+            StringRef A = Ann->getAnnotation();
+            if (!A.starts_with("objc_interface_by_value:")) continue;
+            StringRef IFaceName = A.drop_front(strlen("objc_interface_by_value:"));
+
+            const ObjCInterfaceDecl *TargetID = nullptr;
+            for (const Decl *TopD : Context->getTranslationUnitDecl()->decls()) {
+                if (const auto *ID = dyn_cast<ObjCInterfaceDecl>(TopD)) {
+                    if (ID->getName() == IFaceName) {
+                        TargetID = ID;
+                        break;
+                    }
+                }
+            }
+
+            bool Eligible = false;
+            if (TargetID && isSealedClass(TargetID) && isFinalClass(TargetID)) {
+                if (IFaceName == "VVector" || hasVeriObjCAnnotation(TargetID, "objc_flat")) {
+                    Eligible = true;
+                }
+            }
+
+            if (!Eligible) {
+                reportError(Loc, "VeriObjC Violation: Interface '%0' cannot be allocated or returned by value: only @flat @final @sealed interfaces support value semantics (VG-006).")
+                    << IFaceName;
+            }
+        }
+
+        // Also verify that any objc_vvector:* record with an ObjCObjectPointerType buf element has a @sealed element class
+        uint32_t VVecCap = 0;
+        if (extractAnnotatedCapacity(D, "objc_vvector:", VVecCap)) {
+            for (const FieldDecl *FD : D->fields()) {
+                if (FD->getName() != "buf") continue;
+                if (const ConstantArrayType *CAT = Context->getAsConstantArrayType(FD->getType())) {
+                    QualType ElemTy = CAT->getElementType();
+                    if (const auto *OPT = ElemTy->getAs<ObjCObjectPointerType>()) {
+                        if (const ObjCInterfaceDecl *ElemID = OPT->getInterfaceDecl()) {
+                            if (!isSealedClass(ElemID)) {
+                                reportError(Loc, "VeriObjC Violation: Invalid vgeneric type argument '%0': type arguments to constrained generics must be @sealed classes.")
+                                    << ElemTy.getAsString();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     bool VisitRecordDecl(RecordDecl *D) {
-        if (D->isCompleteDefinition() && hasVeriObjCAnnotation(D, "objc_flat")) {
-            checkFlatPayloadType(Context->getTypeDeclType(static_cast<const TypeDecl *>(D)), D->getName(), D->getLocation());
+        if (D->isCompleteDefinition()) {
+            if (hasVeriObjCAnnotation(D, "objc_flat")) {
+                checkFlatPayloadType(Context->getTypeDeclType(static_cast<const TypeDecl *>(D)), D->getName(), D->getLocation());
+            }
+            checkInterfaceByValueRecord(D, D->getLocation());
         }
         return true;
     }
@@ -2417,8 +2470,224 @@ class VeriObjCAction : public PluginASTAction {
 private:
     VeriObjCPluginOptions Opts;
 
+    static std::string mangleTypeIdent(llvm::StringRef S) {
+        std::string Out;
+        for (char C : S) {
+            if ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') || (C >= '0' && C <= '9')) {
+                Out.push_back(C);
+            } else if (C == '*') {
+                Out += "_ptr";
+            } else if (C != ' ' && C != '\t') {
+                Out.push_back('_');
+            }
+        }
+        return Out;
+    }
+
+    static bool isIdentChar(char C) {
+        return (C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') ||
+               (C >= '0' && C <= '9') || C == '_';
+    }
+
+    static bool isInLineComment(llvm::StringRef Text, size_t Offset) {
+        size_t LineStart = Text.rfind('\n', Offset);
+        LineStart = (LineStart == llvm::StringRef::npos) ? 0 : (LineStart + 1);
+        return Text.substr(LineStart, Offset - LineStart).contains("//");
+    }
+
+    static void lowerVVectorAndByValueInterfacesInSource(CompilerInstance &CI, llvm::StringRef InFile) {
+        if (InFile.empty() || !CI.hasFileManager() || !CI.hasSourceManager()) return;
+        auto FE = CI.getFileManager().getFileRef(InFile);
+        if (!FE) {
+            llvm::consumeError(FE.takeError());
+            return;
+        }
+        auto BufOrErr = CI.getFileManager().getBufferForFile(*FE);
+        if (!BufOrErr) return;
+
+        std::string Src = (*BufOrErr)->getBuffer().str();
+        std::string Out = Src;
+        std::vector<std::string> SynthStructs;
+        llvm::StringSet<> EmittedNames;
+
+        // 1. VG-005: Lower vvector<ElemType, Cap> (and VVector<ElemType, Cap>)
+        size_t Pos = 0;
+        while (Pos < Out.size()) {
+            size_t MatchPos = std::string::npos;
+            size_t PrefixLen = 0;
+            size_t P1 = Out.find("vvector<", Pos);
+            size_t P2 = Out.find("VVector<", Pos);
+            if (P1 != std::string::npos && (P2 == std::string::npos || P1 <= P2)) {
+                MatchPos = P1;
+                PrefixLen = 8;
+            } else if (P2 != std::string::npos) {
+                MatchPos = P2;
+                PrefixLen = 8;
+            } else {
+                break;
+            }
+
+            if ((MatchPos > 0 && isIdentChar(Out[MatchPos - 1])) || isInLineComment(Out, MatchPos)) {
+                Pos = MatchPos + PrefixLen;
+                continue;
+            }
+            size_t ClosePos = Out.find('>', MatchPos + PrefixLen);
+            size_t LineEnd = Out.find('\n', MatchPos);
+            if (ClosePos == std::string::npos || (LineEnd != std::string::npos && ClosePos > LineEnd)) {
+                Pos = MatchPos + PrefixLen;
+                continue;
+            }
+
+            std::string Inside = Out.substr(MatchPos + PrefixLen, ClosePos - (MatchPos + PrefixLen));
+            size_t CommaPos = Inside.find(',');
+            if (CommaPos != std::string::npos) {
+                std::string Elem = llvm::StringRef(Inside).substr(0, CommaPos).trim().str();
+                std::string Cap = llvm::StringRef(Inside).substr(CommaPos + 1).trim().str();
+                std::string StructName = "__veriobjc_vvec_mono_" + mangleTypeIdent(Elem) + "_" + mangleTypeIdent(Cap);
+                if (EmittedNames.insert(StructName).second) {
+                    bool IsPtr = (Elem.find('*') != std::string::npos);
+                    std::string Attrs = IsPtr
+                        ? ("__attribute__((annotate(\"objc_vvector:" + Cap + "\")))")
+                        : ("__attribute__((annotate(\"objc_vvector:" + Cap + "\"), annotate(\"objc_flat\")))");
+                    SynthStructs.push_back(
+                        "struct " + Attrs + " " + StructName +
+                        " { uint32_t count; uint32_t cap; " + Elem + " buf[" + Cap + "]; };"
+                    );
+                }
+                std::string Repl = "struct " + StructName;
+                Out.replace(MatchPos, ClosePos - MatchPos + 1, Repl);
+                Pos = MatchPos + Repl.size();
+                continue;
+            }
+
+            // 2. VG-006: VVector<ElemType> allocated or returned by value (not followed by '*')
+            if (Out.compare(MatchPos, 8, "VVector<") == 0) {
+                size_t After = ClosePos + 1;
+                while (After < Out.size() && (Out[After] == ' ' || Out[After] == '\t')) After++;
+                if (After < Out.size() && isIdentChar(Out[After])) {
+                    std::string Elem = llvm::StringRef(Inside).trim().str();
+                    if (Elem.find(':') == std::string::npos) {
+                        std::string StructName = "__veriobjc_vvec_byval_" + mangleTypeIdent(Elem);
+                        if (EmittedNames.insert(StructName).second) {
+                            SynthStructs.push_back(
+                                "struct __attribute__((annotate(\"objc_vvector:4\"), annotate(\"objc_interface_by_value:VVector\"))) " +
+                                StructName + " { uint32_t count; uint32_t cap; " + Elem + " buf[4]; };"
+                            );
+                        }
+                        // Capture variable/function identifier immediately following VVector<Elem>
+                        size_t IdentStart = After;
+                        size_t IdentEnd = IdentStart;
+                        while (IdentEnd < Out.size() && isIdentChar(Out[IdentEnd])) IdentEnd++;
+                        std::string IdentName = Out.substr(IdentStart, IdentEnd - IdentStart);
+
+                        std::string Repl = "struct " + StructName;
+                        Out.replace(MatchPos, ClosePos - MatchPos + 1, Repl);
+
+                        // Rewrite [&IdentName ...] receiver expressions to [((VVector<Elem> *)&IdentName) ...]
+                        std::string RecvPat = "[&" + IdentName + " ";
+                        std::string RecvRepl = "[((VVector<" + Elem + "> *)&" + IdentName + ") ";
+                        size_t RPos = 0;
+                        while ((RPos = Out.find(RecvPat, RPos)) != std::string::npos) {
+                            Out.replace(RPos, RecvPat.size(), RecvRepl);
+                            RPos += RecvRepl.size();
+                        }
+                        Pos = MatchPos + Repl.size();
+                        continue;
+                    }
+                }
+            }
+
+            Pos = ClosePos + 1;
+        }
+
+        // 3. VG-006: Detect any user @interface ClsName allocated or returned by value (not followed by '*')
+        std::vector<std::string> UserInterfaces;
+        size_t IPos = 0;
+        while ((IPos = Out.find("@interface ", IPos)) != std::string::npos) {
+            if (isInLineComment(Out, IPos)) {
+                IPos += 11;
+                continue;
+            }
+            size_t NameStart = IPos + 11;
+            while (NameStart < Out.size() && (Out[NameStart] == ' ' || Out[NameStart] == '\t')) NameStart++;
+            size_t NameEnd = NameStart;
+            while (NameEnd < Out.size() && isIdentChar(Out[NameEnd])) NameEnd++;
+            if (NameEnd > NameStart) {
+                std::string IName = Out.substr(NameStart, NameEnd - NameStart);
+                if (IName != "VVector" && IName != "VVectorItem") {
+                    UserInterfaces.push_back(IName);
+                }
+            }
+            IPos = NameEnd;
+        }
+
+        for (const std::string &IName : UserInterfaces) {
+            size_t SPos = 0;
+            while ((SPos = Out.find(IName, SPos)) != std::string::npos) {
+                if (SPos > 0 && isIdentChar(Out[SPos - 1])) {
+                    SPos += IName.size();
+                    continue;
+                }
+                size_t EndPos = SPos + IName.size();
+                if (EndPos < Out.size() && isIdentChar(Out[EndPos])) {
+                    SPos = EndPos;
+                    continue;
+                }
+                // Check prefix is start of line or whitespace (not @interface/@implementation/comment)
+                size_t LineStart = Out.rfind('\n', SPos);
+                LineStart = (LineStart == std::string::npos) ? 0 : (LineStart + 1);
+                llvm::StringRef Prefix = llvm::StringRef(Out).substr(LineStart, SPos - LineStart).trim();
+                if (!Prefix.empty()) {
+                    SPos = EndPos;
+                    continue;
+                }
+                size_t NextTok = EndPos;
+                while (NextTok < Out.size() && (Out[NextTok] == ' ' || Out[NextTok] == '\t')) NextTok++;
+                if (NextTok < Out.size() && isIdentChar(Out[NextTok])) {
+                    std::string StructName = "__veriobjc_iface_byval_" + IName;
+                    if (EmittedNames.insert(StructName).second) {
+                        SynthStructs.push_back(
+                            "struct __attribute__((annotate(\"objc_interface_by_value:" + IName + "\"))) " +
+                            StructName + " { uint32_t __vobj_byval_slot; };"
+                        );
+                    }
+                    std::string Repl = "struct " + StructName;
+                    Out.replace(SPos, IName.size(), Repl);
+                    SPos += Repl.size();
+                    continue;
+                }
+                SPos = EndPos;
+            }
+        }
+
+        if (!SynthStructs.empty()) {
+            std::string Combined;
+            for (const std::string &S : SynthStructs) {
+                Combined += " " + S;
+            }
+            // Insert right after the last @end or last #include so line numbers do not shift
+            size_t InsertAnchor = Out.rfind("@end");
+            if (InsertAnchor != std::string::npos) {
+                InsertAnchor += 4;
+            } else {
+                size_t LastInc = Out.rfind("#include");
+                InsertAnchor = (LastInc != std::string::npos) ? Out.find('\n', LastInc) : 0;
+            }
+            if (InsertAnchor != std::string::npos) {
+                Out.insert(InsertAnchor, Combined);
+            }
+        }
+
+        if (Out != Src) {
+            CI.getSourceManager().overrideFileContents(
+                *FE, llvm::MemoryBuffer::getMemBufferCopy(Out, InFile)
+            );
+        }
+    }
+
 protected:
-    std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef) override {
+    std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef InFile) override {
+        lowerVVectorAndByValueInterfacesInSource(CI, InFile);
         return std::make_unique<VeriObjCConsumer>(CI, Opts);
     }
 
