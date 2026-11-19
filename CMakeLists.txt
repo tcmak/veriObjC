@@ -66,6 +66,7 @@ add_executable(unit_rt_tests
     tests/unit_rt/TestPortfolioConformanceSuite.cpp
     tests/unit_rt/TestBenchHarness.cpp
     tests/unit_rt/TestSurvivorReport.cpp
+    tests/unit_rt/TestLatencyBudgetGate.cpp
 )
 
 target_compile_definitions(unit_rt_tests PRIVATE
