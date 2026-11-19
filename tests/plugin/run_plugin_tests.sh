@@ -104,6 +104,12 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             echo "$HDR_OUT"
             exit 1
         fi
+        SMT_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$SMT_OUT" | grep -q "\[VeriObjC --smt-report\] Function: export_ingest_wire_order | Pre: (assert (hdr.msg_len <= 1400)) | Post: (assert (not (return.generation != 0))) | Solver: (check-sat)"; then
+            echo "[FAIL] Expected --smt-report to emit SMT-LIB2 boundary assertions for export_ingest_wire_order!"
+            echo "$SMT_OUT"
+            exit 1
+        fi
     fi
     if [[ "$(basename "$pos_file")" == "test_valid_mono_dedup.m" ]]; then
         MONO_COUNT=$(nm "$TMP_OBJ" | grep -c "__veriobjc_mono_block_" || true)
