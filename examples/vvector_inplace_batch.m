@@ -1,7 +1,7 @@
 // examples/vvector_inplace_batch.m
-// Demonstrates Task 3.3 & Task 3.3b (<vstd/vector.h>):
+// Demonstrates Task 3.3, Task 3.3b & Task 3.3c (<vstd/vector.h>):
 //   - Constrained vgeneric @interface VVector<T : VVectorItem *> with devirtualized methods & range-for
-//   - Fixed-capacity inplace container vvector<T, N> with zero heap allocation
+//   - Single unified container vvector<T, N> (VG-005) and flat VVector<T> by-value return (VG-006)
 //   - Built-in-place slot construction via vvector_push_inplace
 #include "veriobjc_runtime.h"
 #include "vstd/vector.h"
@@ -17,12 +17,21 @@ __attribute__((annotate("objc_final")))
 @implementation OrderBatchItem
 @end
 
-__vvector_storage_def(OrderBatchVec4, int32_t, 4);
-
 static void construct_order_lot_inplace(int32_t *out_slot, int32_t base_qty) {
     if (out_slot) {
         *out_slot = base_qty * 100;
     }
+}
+
+VVector<OrderBatchItem *> build_order_batch_by_value(
+    OrderBatchItem *item0,
+    OrderBatchItem *item1
+) {
+    VVector<OrderBatchItem *> out;
+    [&out initVec];
+    [&out push:item0];
+    [&out push:item1];
+    return out;
 }
 
 int32_t evaluate_generic_order_batch(
@@ -45,22 +54,22 @@ int32_t evaluate_generic_order_batch(
 
 int32_t run_vvector_batch_demo(void) {
     struct {
-        uint32_t count;
-        uint32_t cap;
-        OrderBatchItem *buf[VVECTOR_GENERIC_CAPACITY];
-    } raw_vec = {0u, 0u, {0, 0, 0, 0}};
-    struct {
         uint32_t item_tag;
         int32_t qty;
     } raw0 = {1u, 25}, raw1 = {2u, 25};
 
-    int32_t generic_sum = evaluate_generic_order_batch(
-        (VVector<OrderBatchItem *> *)&raw_vec,
+    VVector<OrderBatchItem *> by_val_vec = build_order_batch_by_value(
         (OrderBatchItem *)&raw0,
         (OrderBatchItem *)&raw1
     );
 
-    OrderBatchVec4 batch;
+    int32_t generic_sum = evaluate_generic_order_batch(
+        (VVector<OrderBatchItem *> *)&by_val_vec,
+        (OrderBatchItem *)&raw0,
+        (OrderBatchItem *)&raw1
+    );
+
+    vvector<int32_t, 4> batch;
     vvector_init(&batch);
     vvector_push(&batch, generic_sum);
     vvector_push_inplace(&batch, construct_order_lot_inplace, 3);

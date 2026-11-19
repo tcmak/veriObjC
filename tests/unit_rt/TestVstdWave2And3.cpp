@@ -9,7 +9,7 @@
 #include "vstd/stream.h"
 #include "vstd/ternary.h"
 
-__vvector_storage_def(IntVec4, int32_t, 4);
+using IntVec4 = vvector<int32_t, 4>;
 vflat_map_def(OrderFlatMap4, uint64_t, int32_t, 4);
 vhash_flat_def(OrderHashMap8, uint64_t, int32_t, 8);
 

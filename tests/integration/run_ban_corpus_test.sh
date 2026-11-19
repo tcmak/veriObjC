@@ -95,6 +95,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_vvector_unsealed_arg.m)
             EXPECTED_DIAG="Invalid vgeneric type argument"
             ;;
+        valid_objc_nonflat_interface_by_value.m)
+            EXPECTED_DIAG="cannot be allocated or returned by value: only @flat @final @sealed interfaces support value semantics (VG-006)"
+            ;;
         valid_objc_vhash_load_ceiling.m)
             EXPECTED_DIAG="vhash_flat load-factor ceiling exceeded"
             ;;

@@ -213,6 +213,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="vvector push exceeds static capacity"
     elif [[ "$base_name" == test_banned_vvector_unsealed_arg* ]]; then
         EXPECTED_MSG="Invalid vgeneric type argument"
+    elif [[ "$base_name" == test_banned_nonflat_interface_by_value* ]]; then
+        EXPECTED_MSG="cannot be allocated or returned by value: only @flat @final @sealed interfaces support value semantics (VG-006)"
     elif [[ "$base_name" == test_banned_vhash_load_ceiling* ]]; then
         EXPECTED_MSG="vhash_flat load-factor ceiling exceeded"
     elif [[ "$base_name" == test_banned_vvariant_added_case* ]]; then

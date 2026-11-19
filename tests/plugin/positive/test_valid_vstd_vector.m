@@ -13,7 +13,6 @@ __attribute__((objc_final))
 @implementation OrderLotItem
 @end
 
-__vvector_storage_def(BatchVec4, int32_t, 4);
 vstack_array_def(StackIntArr, int32_t);
 
 static int32_t parse_lot_value(int32_t raw) {
@@ -26,12 +25,22 @@ static void parse_into_slot(int32_t *out_slot, int32_t raw) {
     }
 }
 
-BatchVec4 build_vector_by_value(int32_t seed) {
-    BatchVec4 batch;
+// VG-005: vvector<T, N> value-parameter generic container returned by value
+vvector<int32_t, 4> build_vector_by_value(int32_t seed) {
+    vvector<int32_t, 4> batch;
     vvector_init(&batch);
     vvector_push(&batch, parse_lot_value(seed));
     vvector_push_inplace(&batch, parse_into_slot, seed);
     return batch;
+}
+
+// VG-006: Flat @final @sealed @interface VVector<T> allocated on stack & returned by value
+VVector<OrderLotItem *> build_generic_vvector_by_value(OrderLotItem *a, OrderLotItem *b) {
+    VVector<OrderLotItem *> out;
+    [&out initVec];
+    [&out push:a];
+    [&out push:b];
+    return out;
 }
 
 StackIntArr build_stack_array_by_value(struct veriobjc_stack *s, int32_t a, int32_t b) {
@@ -61,7 +70,12 @@ int32_t run_valid_vvector(VVector<OrderLotItem *> *vec, OrderLotItem *a, OrderLo
         }
     }
 
-    BatchVec4 by_val = build_vector_by_value(3);
+    vvector<int32_t, 4> by_val = build_vector_by_value(3);
     int32_t *p = vvector_at(&by_val, 0u);
-    return acc + (p ? *p : 0);
+
+    VVector<OrderLotItem *> obj_by_val = build_generic_vvector_by_value(a, b);
+    OrderLotItem *second = [&obj_by_val at:1u];
+    int32_t obj_val = second ? second->lot_qty : 0;
+
+    return acc + (p ? *p : 0) + obj_val;
 }

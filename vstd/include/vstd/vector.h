@@ -6,7 +6,7 @@ extern "C" {
 #endif
 
 // ---------------------------------------------------------------------------
-// <vstd/vector.h> — Fixed-Capacity Inplace Containers (VVector<T>)
+// <vstd/vector.h> — Fixed-Capacity Inplace Containers (vvector<T, N> / VVector<T>)
 // Layer: vstd (depends on: rt)
 //
 // Invariants:
@@ -15,22 +15,17 @@ extern "C" {
 //      and returns false at runtime.
 //   3. Both vvector_push and vvector_push_inplace construct elements directly
 //      in the destination slot without compound-literal temporaries or memcpy.
-//   4. In Objective-C mode, VVector<T : VVectorItem *> provides a definition-site
-//      checked vgeneric container with covariant devirtualization and range-for.
-//
-// INTERNAL BRIDGE (DEPRECATED — NO NEW PUBLIC DEPENDENTS):
-//   __vvector_storage_def is the internal C/value-type bridge pending Task 3.3c's
-//   plugin lowering for value-parameter generics (VG-005: vvector<T, N>) and
-//   flat @interface return-by-value lowering (VG-006). Once Task 3.3c lands,
-//   __vvector_storage_def will be deleted in favor of a single unified container.
+//   4. Task 3.3c (VG-005 / VG-006): vvector<T, N> lowers both flat value types
+//      and @sealed object pointers with return-by-value support, and flat
+//      @final @sealed VVector<T> supports stack value allocation and by-value
+//      return. The deprecated internal __vvector_storage_def bridge has been
+//      deleted so <vstd/vector.h> exposes a single unified container surface.
 // ---------------------------------------------------------------------------
 
-#define __vvector_storage_def(VecName, ElemType, Cap) \
-    typedef struct __attribute__((annotate("objc_vvector:" #Cap), annotate("objc_flat"))) { \
-        uint32_t count; \
-        uint32_t cap; \
-        ElemType buf[Cap]; \
-    } VecName
+#define vinterface_by_value(InterfaceName) \
+    struct __attribute__((annotate("objc_interface_by_value:" #InterfaceName))) { \
+        uint32_t __vobj_byval_slot; \
+    }
 
 static inline void __vvector_init_raw(void *vec_obj, uint32_t *count_ptr, uint32_t *cap_ptr, uint32_t cap_val) {
     if (!vec_obj) {
@@ -118,6 +113,13 @@ static inline uint32_t __vvector_u32_or_zero(const void *vec_obj, const uint32_t
 
 #ifdef __cplusplus
 }
+
+template <typename ElemType, uint32_t Cap>
+struct __attribute__((annotate("objc_flat"))) vvector {
+    uint32_t count;
+    uint32_t cap;
+    ElemType buf[Cap];
+};
 #endif
 
 #ifdef __OBJC__
