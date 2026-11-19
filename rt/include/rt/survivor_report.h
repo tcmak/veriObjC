@@ -44,10 +44,46 @@ static inline enum rt_survivor_diff_status rt_survivor_diff_audit(
     const struct rt_survivor_snapshot *baseline,
     const struct rt_survivor_snapshot *candidate,
     struct rt_survivor_diff_result *out_res) {
-    (void)baseline;
-    (void)candidate;
-    (void)out_res;
-    return RT_SURVIVOR_DIFF_INVALID_ARG;
+    if (!baseline || !candidate || !out_res ||
+        !baseline->function_or_kernel || !candidate->function_or_kernel) {
+        return RT_SURVIVOR_DIFF_INVALID_ARG;
+    }
+    if (candidate->vtpe_profile != VTPE_PROFILE_CORE &&
+        candidate->vtpe_profile != VTPE_PROFILE_EXTENDED) {
+        return RT_SURVIVOR_DIFF_INVALID_ARG;
+    }
+
+    out_res->offending_function = candidate->function_or_kernel;
+    if (candidate->alloc_survivors > baseline->alloc_survivors) {
+        out_res->status = RT_SURVIVOR_DIFF_NEW_ALLOC_EFFECT;
+        out_res->reason = "added @alloc call site in certified function";
+        return RT_SURVIVOR_DIFF_NEW_ALLOC_EFFECT;
+    }
+    if (candidate->effect_survivors > baseline->effect_survivors) {
+        out_res->status = RT_SURVIVOR_DIFF_NEW_EFFECT_SITE;
+        out_res->reason = "gained surviving effect site";
+        return RT_SURVIVOR_DIFF_NEW_EFFECT_SITE;
+    }
+    if (candidate->unproven_branches > baseline->unproven_branches) {
+        out_res->status = RT_SURVIVOR_DIFF_NEW_UNPROVEN_BRANCH;
+        out_res->reason = "gained unproven data-dependent branch";
+        return RT_SURVIVOR_DIFF_NEW_UNPROVEN_BRANCH;
+    }
+    if (candidate->mono_instantiations > baseline->mono_instantiations ||
+        candidate->mono_code_bytes > baseline->mono_code_bytes) {
+        out_res->status = RT_SURVIVOR_DIFF_MONO_REGRESSION;
+        out_res->reason = "monomorphization instantiation or code-size growth";
+        return RT_SURVIVOR_DIFF_MONO_REGRESSION;
+    }
+    if (candidate->hw_dsp_blocks > 0u || candidate->dsp_mode != RT_BENCH_DSP_ZERO) {
+        out_res->status = RT_SURVIVOR_DIFF_NONZERO_DSP;
+        out_res->reason = "hardware kernel violates 0-DSP invariant";
+        return RT_SURVIVOR_DIFF_NONZERO_DSP;
+    }
+
+    out_res->status = RT_SURVIVOR_DIFF_OK;
+    out_res->reason = "no survivor regression";
+    return RT_SURVIVOR_DIFF_OK;
 }
 
 #ifdef __cplusplus

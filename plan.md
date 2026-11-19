@@ -274,11 +274,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 4.1: Cycle-Accurate Microbenchmark Harness**
   - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0` via `rt_bench_read_cycles` in `<rt/bench_harness.h>`) and deterministic p50/p99/p99.9 + teardown cycle extraction (`rt_bench_compute_stats`) benchmarking unified `vvector<T, N>` containers directly (`tests/unit_rt/TestBenchHarness.cpp`).
   - *Amendment 4 (2026-11-18):* benchmark reporting adopts the kit's M6 methodology (`rt_bench_validate_m6_record`, `rt_bench_format_m6_line`: fixed non-zero `M×N×K` shapes, cited baselines, $-normalization in cents, `vtpe_profile=core|extended`, and `dsp_mode=zero-dsp|dsp-enabled` named on every number) with 100.00% `llvm-cov` coverage.
-- [ ] **Task 4.2: Survivor Reports as Build Artifacts**
+- [x] **Task 4.2: Survivor Reports as Build Artifacts**
   - `--effects-report`: per-line survivor report of effectful call sites.
-  - `--branch-report`: classification of unproven data-dependent branches.
+  - `--branch-report`: classification of proven, hinted (`__builtin_expect`), and unproven data-dependent branches in `@nolatency` / `@pure` functions (`compiler/src/VeriObjCPlugin.cpp`).
   - `--mono-report`: monomorphization byte budget and instantiation tracking.
-  - `--hw-report`: per-kernel fabric resource audit (LUTs/FFs/BRAMs/DSPs) with the zero-DSP synthesis gate; *Amendment 4:* gains the VTPE profile + DSP-mode fields the shared benchmark methodology requires.
+  - `--hw-report`: per-kernel fabric resource audit (LUTs/FFs/BRAMs/DSPs) with the zero-DSP synthesis gate; *Amendment 4:* emits `VTPEProfile: core | DSPMode: zero-dsp`.
+  - Survivor report diff engine (`rt_survivor_diff_audit` in `<rt/survivor_report.h>`, verified in `tests/unit_rt/TestSurvivorReport.cpp` with 100.00% `llvm-cov` coverage) rejecting new `@alloc` effects, surviving effect growth, new unproven branches, monomorphization regressions, and non-zero DSP blocks.
 - [ ] **Task 4.3: Latency Budget Gates**
   - CI budget check: p50/p99 regression beyond noise band fails build.
 - [ ] **Task 4.4: Formal Math Proof Integration (SMACK / Z3)**

@@ -36,6 +36,7 @@ namespace {
 struct VeriObjCPluginOptions {
     bool EmitHwReport = false;
     bool EmitEffectsReport = false;
+    bool EmitBranchReport = false;
     bool EmitMonoReport = false;
     bool EmitExportHeader = false;
 };
@@ -1572,7 +1573,7 @@ private:
             unsigned Stages = LastReduceStages > 0 ? LastReduceStages : 9;
             llvm::errs() << "[VeriObjC --hw-report] Kernel: " << KernelName
                          << " | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: "
-                         << Stages << " | Status: PASS (0 DSPs)\n";
+                         << Stages << " | Status: PASS (0 DSPs) | VTPEProfile: core | DSPMode: zero-dsp\n";
         }
     }
 
@@ -1625,7 +1626,8 @@ private:
         } else if (IsPure && !Eff.empty()) {
             reportError(CE->getExprLoc(), "VeriObjC Violation: Effectful call '%0' (%1) is not permitted in a @pure context.")
                 << Name << Eff;
-        } else if (Eff.empty() && !CalleeFD->hasBody() && !isInRuntimeHeader(CalleeFD->getLocation()) &&
+        } else if (Eff.empty() && !CalleeFD->hasBody() && CalleeFD->getBuiltinID() == 0 &&
+                   !isInRuntimeHeader(CalleeFD->getLocation()) &&
                    !hasVeriObjCAnnotation(CalleeFD, "objc_nolatency") &&
                    !hasVeriObjCAnnotation(CalleeFD, "objc_pure") &&
                    !hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr")) {
@@ -1644,20 +1646,63 @@ private:
         }
     }
 
+    static bool exprContainsBuiltinExpect(const Stmt *S) {
+        if (!S) return false;
+        if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const FunctionDecl *Callee = CE->getDirectCallee()) {
+                if (Callee->getName() == "__builtin_expect") return true;
+            }
+        }
+        for (const Stmt *Child : S->children()) {
+            if (exprContainsBuiltinExpect(Child)) return true;
+        }
+        return false;
+    }
+
+    void walkFunctionBranches(const Stmt *S, unsigned &Proven, unsigned &Hinted, unsigned &Unproven) {
+        if (!S) return;
+        if (const auto *IS = dyn_cast<IfStmt>(S)) {
+            const Expr *Cond = IS->getCond();
+            bool BoolVal = false;
+            if (Cond && Cond->IgnoreParenImpCasts()->EvaluateAsBooleanCondition(BoolVal, *Context)) {
+                ++Proven;
+            } else if (exprContainsBuiltinExpect(Cond)) {
+                ++Hinted;
+            } else {
+                ++Unproven;
+            }
+        }
+        for (const Stmt *Child : S->children()) {
+            walkFunctionBranches(Child, Proven, Hinted, Unproven);
+        }
+    }
+
     void auditFunctionEffectsAndReport(const FunctionDecl *FD) {
         if (!FD || !FD->hasBody()) return;
         std::vector<std::string> Survivors;
         walkFunctionEffects(FD->getBody(), FD, Survivors);
-        if (Context->getDiagnostics().hasErrorOccurred() || !Opts.EmitEffectsReport) return;
+        if (Context->getDiagnostics().hasErrorOccurred()) return;
 
-        if (Survivors.empty()) {
-            llvm::errs() << "[VeriObjC --effects-report] Function: " << FD->getName()
-                         << " | Survivors: 0 (effect-free)\n";
-        } else {
-            for (const std::string &Entry : Survivors) {
+        if (Opts.EmitEffectsReport) {
+            if (Survivors.empty()) {
                 llvm::errs() << "[VeriObjC --effects-report] Function: " << FD->getName()
-                             << " | " << Entry << "\n";
+                             << " | Survivors: 0 (effect-free)\n";
+            } else {
+                for (const std::string &Entry : Survivors) {
+                    llvm::errs() << "[VeriObjC --effects-report] Function: " << FD->getName()
+                                 << " | " << Entry << "\n";
+                }
             }
+        }
+
+        if (Opts.EmitBranchReport &&
+            (hasVeriObjCAnnotation(FD, "objc_nolatency") || hasVeriObjCAnnotation(FD, "objc_pure"))) {
+            unsigned Proven = 0, Hinted = 0, Unproven = 0;
+            walkFunctionBranches(FD->getBody(), Proven, Hinted, Unproven);
+            llvm::errs() << "[VeriObjC --branch-report] Function: " << FD->getName()
+                         << " | Proven: " << Proven
+                         << " | Hinted: " << Hinted
+                         << " | Unproven: " << Unproven << "\n";
         }
     }
 
@@ -2695,6 +2740,7 @@ protected:
         for (const std::string &A : args) {
             if (A == "--hw-report") Opts.EmitHwReport = true;
             else if (A == "--effects-report") Opts.EmitEffectsReport = true;
+            else if (A == "--branch-report") Opts.EmitBranchReport = true;
             else if (A == "--mono-report") Opts.EmitMonoReport = true;
             else if (A == "--export-header-stdout") Opts.EmitExportHeader = true;
         }

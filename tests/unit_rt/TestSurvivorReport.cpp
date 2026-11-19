@@ -81,6 +81,10 @@ TEST(SurvivorReportGroup, SurvivorDiffBlocksNewAllocEffectsUnprovenBranchesAndMo
     LONGS_EQUAL(RT_SURVIVOR_DIFF_INVALID_ARG, rt_survivor_diff_audit(&bad_fn, &base, &res));
     LONGS_EQUAL(RT_SURVIVOR_DIFF_INVALID_ARG, rt_survivor_diff_audit(&base, &bad_fn, &res));
 
+    struct rt_survivor_snapshot ext_prof = base;
+    ext_prof.vtpe_profile = VTPE_PROFILE_EXTENDED;
+    LONGS_EQUAL(RT_SURVIVOR_DIFF_OK, rt_survivor_diff_audit(&base, &ext_prof, &res));
+
     struct rt_survivor_snapshot bad_prof = base;
     bad_prof.vtpe_profile = static_cast<vtpe_v1_profile_t>(99);
     LONGS_EQUAL(RT_SURVIVOR_DIFF_INVALID_ARG, rt_survivor_diff_audit(&base, &bad_prof, &res));
