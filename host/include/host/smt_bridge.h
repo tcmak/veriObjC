@@ -1,7 +1,7 @@
-#ifndef VERIOBJC_RT_SMT_BRIDGE_H
-#define VERIOBJC_RT_SMT_BRIDGE_H
+#ifndef VERIOBJC_HOST_SMT_BRIDGE_H
+#define VERIOBJC_HOST_SMT_BRIDGE_H
 
-#include "rt/bench_harness.h"
+#include "host/bench_harness.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -83,4 +83,4 @@ static inline enum rt_contract_endpoint_status rt_contract_eval_endpoints_stub(
 }
 #endif
 
-#endif /* VERIOBJC_RT_SMT_BRIDGE_H */
+#endif /* VERIOBJC_HOST_SMT_BRIDGE_H */

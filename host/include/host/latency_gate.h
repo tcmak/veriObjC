@@ -1,7 +1,7 @@
-#ifndef VERIOBJC_RT_LATENCY_GATE_H
-#define VERIOBJC_RT_LATENCY_GATE_H
+#ifndef VERIOBJC_HOST_LATENCY_GATE_H
+#define VERIOBJC_HOST_LATENCY_GATE_H
 
-#include "rt/bench_harness.h"
+#include "host/bench_harness.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -128,4 +128,4 @@ static inline enum rt_latency_gate_status rt_latency_gate_check(
 }
 #endif
 
-#endif /* VERIOBJC_RT_LATENCY_GATE_H */
+#endif /* VERIOBJC_HOST_LATENCY_GATE_H */

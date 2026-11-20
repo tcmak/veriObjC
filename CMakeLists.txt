@@ -79,6 +79,12 @@ target_include_directories(veriobjc_hw INTERFACE
 )
 target_link_libraries(veriobjc_hw INTERFACE veriobjc_sys0 veriobjc_rt)
 
+add_library(veriobjc_host INTERFACE)
+target_include_directories(veriobjc_host INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/host/include
+)
+target_link_libraries(veriobjc_host INTERFACE veriobjc_vstd veriobjc_rt)
+
 if(BUILD_TESTING)
     if(NOT CPPUTEST_INCLUDE_DIRS OR NOT CPPUTEST_LIB OR NOT CPPUTEST_EXT_LIB)
         message(FATAL_ERROR
@@ -100,7 +106,7 @@ if(BUILD_TESTING)
         tests/unit_rt/TestVstdWave1.cpp
         tests/unit_rt/TestVstdWave2And3.cpp
         tests/unit_rt/TestVstdWave4And5.cpp
-        tests/unit_rt/TestVtpeV1GoldenCorpus.cpp
+        tests/unit_rt/TestTtapeGoldenCorpus.cpp
         tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
         tests/unit_rt/TestBenchHarness.cpp
         tests/unit_rt/TestSurvivorReport.cpp
@@ -126,6 +132,7 @@ if(BUILD_TESTING)
         veriobjc_vstd
         veriobjc_sys0
         veriobjc_hw
+        veriobjc_host
     )
 
     target_include_directories(unit_rt_tests SYSTEM PRIVATE

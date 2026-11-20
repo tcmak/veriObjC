@@ -1,7 +1,7 @@
-#ifndef VERIOBJC_RT_SURVIVOR_REPORT_H
-#define VERIOBJC_RT_SURVIVOR_REPORT_H
+#ifndef VERIOBJC_HOST_SURVIVOR_REPORT_H
+#define VERIOBJC_HOST_SURVIVOR_REPORT_H
 
-#include "rt/bench_harness.h"
+#include "host/bench_harness.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,7 +30,7 @@ struct rt_survivor_snapshot {
     uint32_t hw_ffs;
     uint32_t hw_brams;
     uint32_t hw_dsp_blocks;
-    vtpe_v1_profile_t vtpe_profile;
+    ttape_v1_profile_t ttape_profile;
     enum rt_bench_dsp_mode dsp_mode;
 };
 
@@ -48,8 +48,9 @@ static inline enum rt_survivor_diff_status rt_survivor_diff_audit(
         !baseline->function_or_kernel || !candidate->function_or_kernel) {
         return RT_SURVIVOR_DIFF_INVALID_ARG;
     }
-    if (candidate->vtpe_profile != VTPE_PROFILE_CORE &&
-        candidate->vtpe_profile != VTPE_PROFILE_EXTENDED) {
+    if (candidate->ttape_profile != TTAPE_PROFILE_CORE &&
+        candidate->ttape_profile != TTAPE_PROFILE_GROUPED &&
+        candidate->ttape_profile != TTAPE_PROFILE_EXTENDED) {
         return RT_SURVIVOR_DIFF_INVALID_ARG;
     }
 
@@ -90,4 +91,4 @@ static inline enum rt_survivor_diff_status rt_survivor_diff_audit(
 }
 #endif
 
-#endif /* VERIOBJC_RT_SURVIVOR_REPORT_H */
+#endif /* VERIOBJC_HOST_SURVIVOR_REPORT_H */

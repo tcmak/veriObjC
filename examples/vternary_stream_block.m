@@ -6,6 +6,7 @@
 #include "veriobjc_runtime.h"
 #include "vstd/stream.h"
 #include "vstd/ternary.h"
+#include "vstd/ttape_reader.h"
 
 vstream_token_shift_def(TokenShiftReg4, int32_t, 4);
 vstream_kv_arena_def(PreBankedKVArena8, int32_t, 2, 8);

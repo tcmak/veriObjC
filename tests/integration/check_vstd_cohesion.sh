@@ -47,19 +47,25 @@ check_header_layer() {
     fi
 }
 
-# 1. Layer 'rt': may import nothing from vstd, sys0, hw
-check_header_layer "$REPO_ROOT/rt/include/veriobjc_runtime.h" "rt" "(vstd/|sys0/|hw/)" \
-    -I"$REPO_ROOT/rt/include"
+# 1. Layer 'rt': may import nothing from vstd, sys0, hw, host; must compile -ffreestanding -mno-sse with zero float/double
+check_header_layer "$REPO_ROOT/rt/include/veriobjc_runtime.h" "rt" "(vstd/|sys0/|hw/|host/)" \
+    -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include"
 shopt -s nullglob
 for hdr in "$REPO_ROOT"/rt/include/rt/*.h; do
-    check_header_layer "$hdr" "rt" "(vstd/|sys0/|hw/)" \
-        -I"$REPO_ROOT/rt/include"
+    check_header_layer "$hdr" "rt" "(vstd/|sys0/|hw/|host/)" \
+        -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include"
+done
+for rt_hdr in "$REPO_ROOT/rt/include/veriobjc_runtime.h" "$REPO_ROOT"/rt/include/rt/*.h; do
+    if clang-23 -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include" -E -P "$rt_hdr" | grep -qwE "float|double"; then
+        echo "[FAIL] Freestanding header $rt_hdr contains forbidden floating-point type (float/double)!"
+        exit 1
+    fi
 done
 
-# 2. Layer 'vstd': may import rt and vstd ONLY (never sys0 or hw)
+# 2. Layer 'vstd': may import rt and vstd ONLY (never sys0, hw, or host)
 for hdr in "$REPO_ROOT"/vstd/include/vstd/*.h; do
     base=$(basename "$hdr")
-    check_header_layer "$hdr" "vstd" "(sys0/|hw/)" \
+    check_header_layer "$hdr" "vstd" "(sys0/|hw/|host/)" \
         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include"
 
     if ! grep -q "vstd/$base" "$README_FILE"; then
@@ -68,10 +74,10 @@ for hdr in "$REPO_ROOT"/vstd/include/vstd/*.h; do
     fi
 done
 
-# 3. Layer 'sys0': may import rt and sys0 ONLY (never vstd or hw)
+# 3. Layer 'sys0': may import rt and sys0 ONLY (never vstd, hw, or host)
 for hdr in "$REPO_ROOT"/sys0/include/sys0/*.h; do
     base=$(basename "$hdr")
-    check_header_layer "$hdr" "sys0" "(vstd/|hw/)" \
+    check_header_layer "$hdr" "sys0" "(vstd/|hw/|host/)" \
         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/sys0/include"
 
     if ! grep -q "sys0/$base" "$README_FILE"; then
@@ -80,16 +86,22 @@ for hdr in "$REPO_ROOT"/sys0/include/sys0/*.h; do
     fi
 done
 
-# 4. Layer 'hw': may import rt, sys0, hw ONLY (never vstd)
+# 4. Layer 'hw': may import rt, sys0, hw ONLY (never vstd or host)
 for hdr in "$REPO_ROOT"/hw/include/hw/*.h; do
     base=$(basename "$hdr")
-    check_header_layer "$hdr" "hw" "(vstd/)" \
+    check_header_layer "$hdr" "hw" "(vstd/|host/)" \
         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/sys0/include" -I"$REPO_ROOT/hw/include"
 
     if ! grep -q "hw/$base" "$README_FILE"; then
         echo "[FAIL] Public header <hw/$base> has no documented example entry in examples/README.md!"
         exit 1
     fi
+done
+
+# 5. Layer 'host': host benchmarking, scheduler & report tooling; may import rt, vstd, host ONLY (never sys0 or hw)
+for hdr in "$REPO_ROOT"/host/include/host/*.h; do
+    check_header_layer "$hdr" "host" "(sys0/|hw/)" \
+        -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/host/include"
 done
 
 # 5. Negative Self-Test: Verify gate rejects a synthetic leaf header with an illegal cross-layer include (both C and Objective-C halves)

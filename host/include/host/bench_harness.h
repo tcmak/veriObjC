@@ -1,7 +1,8 @@
-#ifndef VERIOBJC_RT_BENCH_HARNESS_H
-#define VERIOBJC_RT_BENCH_HARNESS_H
+#ifndef VERIOBJC_HOST_BENCH_HARNESS_H
+#define VERIOBJC_HOST_BENCH_HARNESS_H
 
 #include "veriobjc_runtime.h"
+#include "vstd/ttape_reader.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -28,7 +29,7 @@ struct rt_bench_m6_record {
     uint16_t shape_k;
     const char *cited_baseline;
     uint32_t dollar_norm_cents;
-    vtpe_v1_profile_t vtpe_profile;
+    ttape_v1_profile_t ttape_profile;
     enum rt_bench_dsp_mode dsp_mode;
     struct rt_bench_stats stats;
 };
@@ -89,7 +90,9 @@ static inline int rt_bench_validate_m6_record(const struct rt_bench_m6_record *r
     if (rec->dollar_norm_cents == 0u) {
         return 0;
     }
-    if (rec->vtpe_profile != VTPE_PROFILE_CORE && rec->vtpe_profile != VTPE_PROFILE_EXTENDED) {
+    if (rec->ttape_profile != TTAPE_PROFILE_CORE &&
+        rec->ttape_profile != TTAPE_PROFILE_GROUPED &&
+        rec->ttape_profile != TTAPE_PROFILE_EXTENDED) {
         return 0;
     }
     if (rec->dsp_mode != RT_BENCH_DSP_ZERO && rec->dsp_mode != RT_BENCH_DSP_ENABLED) {
@@ -130,7 +133,9 @@ static inline int rt_bench_format_m6_line(
         return 0;
     }
     const char *prof_str =
-        (rec->vtpe_profile == VTPE_PROFILE_EXTENDED) ? "extended" : "core";
+        (rec->ttape_profile == TTAPE_PROFILE_EXTENDED)
+            ? "extended"
+            : ((rec->ttape_profile == TTAPE_PROFILE_GROUPED) ? "grouped" : "core");
     const char *dsp_str =
         (rec->dsp_mode == RT_BENCH_DSP_ENABLED) ? "dsp-enabled" : "zero-dsp";
 
@@ -147,7 +152,7 @@ static inline int rt_bench_format_m6_line(
     p = rt_bench_append_str(out_buf, p, rec->cited_baseline);
     p = rt_bench_append_str(out_buf, p, " dollar_cents=");
     p = rt_bench_append_u64(out_buf, p, rec->dollar_norm_cents);
-    p = rt_bench_append_str(out_buf, p, " vtpe_profile=");
+    p = rt_bench_append_str(out_buf, p, " ttape_profile=");
     p = rt_bench_append_str(out_buf, p, prof_str);
     p = rt_bench_append_str(out_buf, p, " dsp_mode=");
     p = rt_bench_append_str(out_buf, p, dsp_str);
@@ -167,4 +172,4 @@ static inline int rt_bench_format_m6_line(
 }
 #endif
 
-#endif /* VERIOBJC_RT_BENCH_HARNESS_H */
+#endif /* VERIOBJC_HOST_BENCH_HARNESS_H */

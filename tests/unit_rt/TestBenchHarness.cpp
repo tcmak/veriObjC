@@ -2,7 +2,7 @@
 #include <cstring>
 #include <string>
 
-#include "rt/bench_harness.h"
+#include "host/bench_harness.h"
 #include "vstd/vector.h"
 
 TEST_GROUP(BenchHarnessGroup) {};
@@ -42,7 +42,7 @@ TEST(BenchHarnessGroup, Amendment4KitM6MethodologyValidationAndFormatting) {
     rec.shape_k = 4;
     rec.cited_baseline = "setun-litex-s3-ref";
     rec.dollar_norm_cents = 4900u;
-    rec.vtpe_profile = VTPE_PROFILE_CORE;
+    rec.ttape_profile = TTAPE_PROFILE_CORE;
     rec.dsp_mode = RT_BENCH_DSP_ZERO;
     rec.stats.min_cycles = 10;
     rec.stats.p50_cycles = 14;
@@ -60,19 +60,24 @@ TEST(BenchHarnessGroup, Amendment4KitM6MethodologyValidationAndFormatting) {
     CHECK(s.find("shape=2x1x4") != std::string::npos);
     CHECK(s.find("baseline=setun-litex-s3-ref") != std::string::npos);
     CHECK(s.find("dollar_cents=4900") != std::string::npos);
-    CHECK(s.find("vtpe_profile=core") != std::string::npos);
+    CHECK(s.find("ttape_profile=core") != std::string::npos);
     CHECK(s.find("dsp_mode=zero-dsp") != std::string::npos);
     CHECK(s.find("p50=14") != std::string::npos);
     CHECK(s.find("p99=18") != std::string::npos);
     CHECK(s.find("teardown=4") != std::string::npos);
 
-    // Extended profile + DSP enabled formatting branch
+    // Grouped and Extended profile + DSP enabled formatting branches
+    struct rt_bench_m6_record grp_rec = rec;
+    grp_rec.ttape_profile = TTAPE_PROFILE_GROUPED;
+    LONGS_EQUAL(1, rt_bench_format_m6_line(&grp_rec, line, sizeof(line)));
+    CHECK(std::string(line).find("ttape_profile=grouped") != std::string::npos);
+
     struct rt_bench_m6_record ext_rec = rec;
-    ext_rec.vtpe_profile = VTPE_PROFILE_EXTENDED;
+    ext_rec.ttape_profile = TTAPE_PROFILE_EXTENDED;
     ext_rec.dsp_mode = RT_BENCH_DSP_ENABLED;
     LONGS_EQUAL(1, rt_bench_format_m6_line(&ext_rec, line, sizeof(line)));
     std::string s_ext(line);
-    CHECK(s_ext.find("vtpe_profile=extended") != std::string::npos);
+    CHECK(s_ext.find("ttape_profile=extended") != std::string::npos);
     CHECK(s_ext.find("dsp_mode=dsp-enabled") != std::string::npos);
 
     // Rejection of incomplete M6 records (missing baseline, shape, $-norm, profile, dsp_mode)
@@ -102,7 +107,7 @@ TEST(BenchHarnessGroup, Amendment4KitM6MethodologyValidationAndFormatting) {
     bad.dollar_norm_cents = 0;
     LONGS_EQUAL(0, rt_bench_validate_m6_record(&bad));
     bad = rec;
-    bad.vtpe_profile = static_cast<vtpe_v1_profile_t>(99);
+    bad.ttape_profile = static_cast<ttape_v1_profile_t>(99);
     LONGS_EQUAL(0, rt_bench_validate_m6_record(&bad));
     bad = rec;
     bad.dsp_mode = static_cast<enum rt_bench_dsp_mode>(99);

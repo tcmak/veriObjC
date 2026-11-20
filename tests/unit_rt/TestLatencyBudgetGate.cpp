@@ -1,7 +1,7 @@
 #include <CppUTest/TestHarness.h>
 #include <cstring>
 
-#include "rt/latency_gate.h"
+#include "host/latency_gate.h"
 
 TEST_GROUP(LatencyBudgetGateGroup) {};
 
@@ -22,7 +22,7 @@ TEST(LatencyBudgetGateGroup, LatencyGatePassesWithinNoiseBandAndFailsClosedOnReg
     rec.shape_k = 16u;
     rec.cited_baseline = "clang23_std_vector_O3";
     rec.dollar_norm_cents = 29900u;
-    rec.vtpe_profile = VTPE_PROFILE_CORE;
+    rec.ttape_profile = TTAPE_PROFILE_CORE;
     rec.dsp_mode = RT_BENCH_DSP_ZERO;
     rec.stats.min_cycles = 16u;
     rec.stats.p50_cycles = 22u;  // 20 + 2 <= 20 + 3 (within noise band)

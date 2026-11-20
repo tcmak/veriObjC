@@ -4,6 +4,7 @@
 
 extern "C" {
 #include "veriobjc_runtime.h"
+#include "rt/dispatch.h"
 }
 
 TEST_GROUP(VeriObjC_Dispatch) {
@@ -173,4 +174,7 @@ TEST(VeriObjC_Dispatch, ObjectDispatchResolvesViaIsaAndGuardsNullObject) {
 
     POINTERS_EQUAL((void *)dummy_method_a, (void *)veriobjc_object_dispatch(obj, SEL_A));
     POINTERS_EQUAL(nullptr, (void *)veriobjc_object_dispatch(nullptr, SEL_A));
+    POINTERS_EQUAL(nullptr, (void *)veriobjc_dispatch_by_sel_name(nullptr, "processPacket:"));
+    POINTERS_EQUAL(nullptr, (void *)veriobjc_dispatch_by_sel_name(obj, nullptr));
+    POINTERS_EQUAL(nullptr, (void *)veriobjc_dispatch_by_sel_name(obj, "unregistered:"));
 }

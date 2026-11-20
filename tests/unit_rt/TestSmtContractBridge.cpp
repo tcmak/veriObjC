@@ -1,7 +1,7 @@
 #include <CppUTest/TestHarness.h>
 #include <cstring>
 
-#include "rt/smt_bridge.h"
+#include "host/smt_bridge.h"
 
 TEST_GROUP(SmtContractBridgeGroup) {};
 
