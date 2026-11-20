@@ -1,0 +1,3 @@
+[submodule "third_party/TernaryTape"]
+	path = third_party/TernaryTape
+	url = git@github.com:tcmak/TenaryTape.jl.git
