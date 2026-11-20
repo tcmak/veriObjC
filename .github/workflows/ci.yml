@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  ci:
+    name: Build, CTest & Integration Gates
+    runs-on: ubuntu-24.04
+    env:
+      LLVM_VERSION: "23"
+      VERIOBJC_DEPS: ${{ runner.temp }}/veriobjc-deps
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Cache CppUTest build
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/veriobjc-deps/cpputest
+          key: ${{ runner.os }}-cpputest-master-v1
+
+      - name: Install LLVM 23 and CppUTest via bootstrap script
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y lsb-release wget software-properties-common gnupg
+          bash scripts/install.sh
+
+      - name: Configure and build with CMake
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="clang-${LLVM_VERSION}" \
+            -DCMAKE_CXX_COMPILER="clang++-${LLVM_VERSION}" \
+            -DLLVM_DIR="/usr/lib/llvm-${LLVM_VERSION}/lib/cmake/llvm" \
+            -DCPPUTEST_ROOT="${VERIOBJC_DEPS}/cpputest"
+          cmake --build build -j"$(nproc)"
+
+      - name: Run CTest suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Run integration gate scripts
+        run: |
+          for script in tests/integration/*.sh; do
+            echo "=== Running ${script} ==="
+            bash "${script}"
+          done
