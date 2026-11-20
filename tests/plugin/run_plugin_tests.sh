@@ -62,6 +62,11 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
     fi
     if [[ "$(basename "$pos_file")" == "test_valid_ternary_dot.m" ]]; then
         HW_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --hw-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
+        if ! echo "$HW_OUT" | grep -q "^\[PLACEHOLDER: constant estimate\] \[VeriObjC --hw-report\]"; then
+            echo "[FAIL] Expected --hw-report to be prefixed with '[PLACEHOLDER: constant estimate]' in test_valid_ternary_dot.m!"
+            echo "$HW_OUT"
+            exit 1
+        fi
         if ! echo "$HW_OUT" | grep -q "DSPs: 0 | ReduceStages: 9 | Status: PASS"; then
             echo "[FAIL] Expected --hw-report to show DSPs: 0 and ReduceStages: 9 in test_valid_ternary_dot.m!"
             echo "$HW_OUT"
@@ -105,8 +110,13 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
         SMT_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
-        if ! echo "$SMT_OUT" | grep -q "\[VeriObjC --smt-report\] Function: export_ingest_wire_order | Pre: (assert (hdr.msg_len <= 1400)) | Post: (assert (not (return.generation != 0))) | Solver: (check-sat)"; then
-            echo "[FAIL] Expected --smt-report to emit SMT-LIB2 boundary assertions for export_ingest_wire_order!"
+        if ! echo "$SMT_OUT" | grep -q "\[VeriObjC --smt-report\] Function: export_ingest_wire_order | Pre: (assert (hdr.msg_len <= 1400)) | Post: (assert (not (return.generation != 0))) | Solver: UNIMPLEMENTED_STUB"; then
+            echo "[FAIL] Expected --smt-report to emit honest UNIMPLEMENTED_STUB solver status for export_ingest_wire_order!"
+            echo "$SMT_OUT"
+            exit 1
+        fi
+        if echo "$SMT_OUT" | grep -q "(check-sat)"; then
+            echo "[FAIL] Expected --smt-report to omit fake (check-sat) output when no solver is invoked!"
             echo "$SMT_OUT"
             exit 1
         fi

@@ -1572,7 +1572,7 @@ private:
         verifyHwKernelNoMultiply(Body, KernelName);
         if (!Context->getDiagnostics().hasErrorOccurred() && Opts.EmitHwReport) {
             unsigned Stages = LastReduceStages > 0 ? LastReduceStages : 9;
-            llvm::errs() << "[VeriObjC --hw-report] Kernel: " << KernelName
+            llvm::errs() << "[PLACEHOLDER: constant estimate] [VeriObjC --hw-report] Kernel: " << KernelName
                          << " | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: "
                          << Stages << " | Status: PASS (0 DSPs) | VTPEProfile: core | DSPMode: zero-dsp\n";
         }
@@ -1744,7 +1744,7 @@ private:
             llvm::errs() << "[VeriObjC --smt-report] Function: " << D->getName()
                          << " | Pre: (assert (" << PreExpr << "))"
                          << " | Post: (assert (not (" << PostExpr << ")))"
-                         << " | Solver: (check-sat)\n";
+                         << " | Solver: UNIMPLEMENTED_STUB (no external SMT solver invoked)\n";
         }
         if (!Opts.EmitExportHeader) return;
         llvm::errs() << "extern " << D->getReturnType().getAsString() << " " << D->getName() << "(";

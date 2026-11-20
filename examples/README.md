@@ -146,7 +146,7 @@ clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -Wno-objc-root-class -fblocks \
 ```
 Expected `--hw-report` output:
 ```text
-[VeriObjC --hw-report] Kernel: TernaryGLUBlock::forward:prev:gateTape:tapeLen:upTape:upTapeLen: | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs)
+[PLACEHOLDER: constant estimate] [VeriObjC --hw-report] Kernel: TernaryGLUBlock::forward:prev:gateTape:tapeLen:upTape:upTapeLen: | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs) | VTPEProfile: core | DSPMode: zero-dsp
 ```
 
 #### 3. Inspect `.rodata` DFA Tables on the Regex Router Example
