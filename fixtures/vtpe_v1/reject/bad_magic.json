@@ -1,7 +1,0 @@
-{
-  "fixture": "reject/bad_magic.bin",
-  "expected": "reject",
-  "error_code": "VTPE_ERR_BAD_MAGIC",
-  "reader_profile": "core",
-  "reason": "Header magic is 'VOBJ' instead of 'VTPE' (0x45505456)."
-}

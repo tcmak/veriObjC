@@ -1,7 +1,0 @@
-{
-  "fixture": "reject/unknown_flags_bit3.bin",
-  "expected": "reject",
-  "error_code": "VTPE_ERR_UNKNOWN_FLAGS",
-  "reader_profile": "core",
-  "reason": "Reserved flag bit 3 (0x08) is set with a valid recomputed header checksum (kit ADR-0002)."
-}

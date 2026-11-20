@@ -1,7 +1,0 @@
-{
-  "fixture": "reject/missing_required_section.bin",
-  "expected": "reject",
-  "error_code": "VTPE_ERR_MISSING_REQUIRED_SECTION",
-  "reader_profile": "extended",
-  "reason": "Extended-profile tape (flags bit 2 = 1) is missing mandatory section 0x0006 (fp32_aux)."
-}

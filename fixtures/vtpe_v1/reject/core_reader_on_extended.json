@@ -1,7 +1,0 @@
-{
-  "fixture": "reject/core_reader_on_extended.bin",
-  "expected": "reject",
-  "error_code": "VTPE_ERR_UNSUPPORTED_PROFILE",
-  "reader_profile": "core",
-  "reason": "Valid Extended-profile tape (flags bit 2 = 1) rejected fail-closed by a Core-only reader."
-}

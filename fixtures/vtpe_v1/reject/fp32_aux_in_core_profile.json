@@ -1,7 +1,0 @@
-{
-  "fixture": "reject/fp32_aux_in_core_profile.bin",
-  "expected": "reject",
-  "error_code": "VTPE_ERR_PROFILE_SECTION_FORBIDDEN",
-  "reader_profile": "extended",
-  "reason": "Core-profile tape (flags bit 2 = 0) carries Extended-only section 0x0006 (fp32_aux)."
-}

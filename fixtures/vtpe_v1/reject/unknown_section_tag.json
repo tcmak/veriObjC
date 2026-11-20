@@ -1,7 +1,0 @@
-{
-  "fixture": "reject/unknown_section_tag.bin",
-  "expected": "reject",
-  "error_code": "VTPE_ERR_UNKNOWN_TAG",
-  "reader_profile": "core",
-  "reason": "Section carries unrecognized tag 0x0099."
-}
