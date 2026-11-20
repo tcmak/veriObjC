@@ -8,16 +8,48 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Point to CppUTest installation (override via -DCPPUTEST_ROOT=... or CPPUTEST_ROOT env var)
-if(DEFINED ENV{CPPUTEST_ROOT})
-    set(DEFAULT_CPPUTEST_ROOT "$ENV{CPPUTEST_ROOT}")
-else()
-    get_filename_component(DEFAULT_CPPUTEST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../cpputest" ABSOLUTE)
+# Discover CppUTest (override via -DCPPUTEST_ROOT=... or CPPUTEST_ROOT env var)
+include(CTest)
+if(NOT CPPUTEST_ROOT)
+    if(DEFINED ENV{CPPUTEST_ROOT} AND NOT "$ENV{CPPUTEST_ROOT}" STREQUAL "")
+        set(DEFAULT_CPPUTEST_ROOT "$ENV{CPPUTEST_ROOT}")
+    elseif(DEFINED ENV{CPPUTEST_DIR} AND NOT "$ENV{CPPUTEST_DIR}" STREQUAL "")
+        set(DEFAULT_CPPUTEST_ROOT "$ENV{CPPUTEST_DIR}")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../cpputest")
+        get_filename_component(DEFAULT_CPPUTEST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../cpputest" ABSOLUTE)
+    elseif(DEFINED ENV{HOME} AND EXISTS "$ENV{HOME}/.veriobjc/cpputest")
+        set(DEFAULT_CPPUTEST_ROOT "$ENV{HOME}/.veriobjc/cpputest")
+    else()
+        get_filename_component(DEFAULT_CPPUTEST_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../cpputest" ABSOLUTE)
+    endif()
+    set(CPPUTEST_ROOT "${DEFAULT_CPPUTEST_ROOT}" CACHE PATH "Path to CppUTest root")
 endif()
-set(CPPUTEST_ROOT "${DEFAULT_CPPUTEST_ROOT}" CACHE PATH "Path to CppUTest root")
-set(CPPUTEST_INCLUDE_DIRS "${CPPUTEST_ROOT}/include")
-set(CPPUTEST_LIB "${CPPUTEST_ROOT}/cpputest_build/src/CppUTest/libCppUTest.a")
-set(CPPUTEST_EXT_LIB "${CPPUTEST_ROOT}/cpputest_build/src/CppUTestExt/libCppUTestExt.a")
+
+find_path(CPPUTEST_INCLUDE_DIRS
+    NAMES CppUTest/TestHarness.h
+    HINTS "${CPPUTEST_ROOT}"
+    PATH_SUFFIXES include
+)
+find_library(CPPUTEST_LIB
+    NAMES CppUTest
+    HINTS "${CPPUTEST_ROOT}"
+    PATH_SUFFIXES
+        cpputest_build/src/CppUTest
+        build/src/CppUTest
+        cpputest_build/lib
+        build/lib
+        lib
+)
+find_library(CPPUTEST_EXT_LIB
+    NAMES CppUTestExt
+    HINTS "${CPPUTEST_ROOT}"
+    PATH_SUFFIXES
+        cpputest_build/src/CppUTestExt
+        build/src/CppUTestExt
+        cpputest_build/lib
+        build/lib
+        lib
+)
 
 # Per-component INTERFACE targets enforcing the Phase 3 Layer Table:
 #   rt   -> (nothing)
@@ -47,74 +79,103 @@ target_include_directories(veriobjc_hw INTERFACE
 )
 target_link_libraries(veriobjc_hw INTERFACE veriobjc_sys0 veriobjc_rt)
 
-enable_testing()
+if(BUILD_TESTING)
+    if(NOT CPPUTEST_INCLUDE_DIRS OR NOT CPPUTEST_LIB OR NOT CPPUTEST_EXT_LIB)
+        message(FATAL_ERROR
+            "CppUTest not found (CPPUTEST_ROOT='${CPPUTEST_ROOT}'). "
+            "Run 'bash scripts/install.sh', pass -DCPPUTEST_ROOT=/path/to/cpputest, "
+            "or disable unit tests with -DBUILD_TESTING=OFF."
+        )
+    endif()
 
-# Unit tests for micro-runtime and vstd / sys0 substrates
-add_executable(unit_rt_tests
-    tests/unit_rt/main.cpp
-    tests/unit_rt/TestStackAlloc.cpp
-    tests/unit_rt/TestPoolAlloc.cpp
-    tests/unit_rt/TestGenPool.cpp
-    tests/unit_rt/TestScopeAndLayout.cpp
-    tests/unit_rt/TestDispatch.cpp
-    tests/unit_rt/TestTapeAndRelPtr.cpp
-    tests/unit_rt/TestVstdWave1.cpp
-    tests/unit_rt/TestVstdWave2And3.cpp
-    tests/unit_rt/TestVstdWave4And5.cpp
-    tests/unit_rt/TestVtpeV1GoldenCorpus.cpp
-    tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
-    tests/unit_rt/TestPortfolioConformanceSuite.cpp
-    tests/unit_rt/TestBenchHarness.cpp
-    tests/unit_rt/TestSurvivorReport.cpp
-    tests/unit_rt/TestLatencyBudgetGate.cpp
-    tests/unit_rt/TestSmtContractBridge.cpp
-)
+    # Unit tests for micro-runtime and vstd / sys0 substrates
+    add_executable(unit_rt_tests
+        tests/unit_rt/main.cpp
+        tests/unit_rt/TestStackAlloc.cpp
+        tests/unit_rt/TestPoolAlloc.cpp
+        tests/unit_rt/TestGenPool.cpp
+        tests/unit_rt/TestScopeAndLayout.cpp
+        tests/unit_rt/TestDispatch.cpp
+        tests/unit_rt/TestTapeAndRelPtr.cpp
+        tests/unit_rt/TestVstdWave1.cpp
+        tests/unit_rt/TestVstdWave2And3.cpp
+        tests/unit_rt/TestVstdWave4And5.cpp
+        tests/unit_rt/TestVtpeV1GoldenCorpus.cpp
+        tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
+        tests/unit_rt/TestPortfolioConformanceSuite.cpp
+        tests/unit_rt/TestBenchHarness.cpp
+        tests/unit_rt/TestSurvivorReport.cpp
+        tests/unit_rt/TestLatencyBudgetGate.cpp
+        tests/unit_rt/TestSmtContractBridge.cpp
+    )
 
-target_compile_definitions(unit_rt_tests PRIVATE
-    VERIOBJC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-)
+    target_compile_definitions(unit_rt_tests PRIVATE
+        VERIOBJC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
 
-# Compile all vstd unit tests as Objective-C++ so the #ifdef __OBJC__ halves of
-# all <vstd/*.h> headers are exercised and measured by llvm-cov.
-set_source_files_properties(
-    tests/unit_rt/TestVstdWave1.cpp
-    tests/unit_rt/TestVstdWave2And3.cpp
-    tests/unit_rt/TestVstdWave4And5.cpp
-    PROPERTIES COMPILE_OPTIONS "-x;objective-c++;-fno-exceptions"
-)
+    # Compile all vstd unit tests as Objective-C++ so the #ifdef __OBJC__ halves of
+    # all <vstd/*.h> headers are exercised and measured by llvm-cov.
+    set_source_files_properties(
+        tests/unit_rt/TestVstdWave1.cpp
+        tests/unit_rt/TestVstdWave2And3.cpp
+        tests/unit_rt/TestVstdWave4And5.cpp
+        PROPERTIES COMPILE_OPTIONS "-x;objective-c++;-fno-exceptions"
+    )
 
-target_link_libraries(unit_rt_tests PRIVATE
-    veriobjc_rt
-    veriobjc_vstd
-    veriobjc_sys0
-    veriobjc_hw
-)
+    target_link_libraries(unit_rt_tests PRIVATE
+        veriobjc_rt
+        veriobjc_vstd
+        veriobjc_sys0
+        veriobjc_hw
+    )
 
-target_include_directories(unit_rt_tests SYSTEM PRIVATE
-    ${CPPUTEST_INCLUDE_DIRS}
-)
+    target_include_directories(unit_rt_tests SYSTEM PRIVATE
+        ${CPPUTEST_INCLUDE_DIRS}
+    )
 
-target_compile_options(unit_rt_tests PRIVATE
-    -fprofile-instr-generate
-    -fcoverage-mapping
-)
+    target_compile_options(unit_rt_tests PRIVATE
+        -fprofile-instr-generate
+        -fcoverage-mapping
+    )
 
-target_link_options(unit_rt_tests PRIVATE
-    -fprofile-instr-generate
-    -fcoverage-mapping
-)
+    target_link_options(unit_rt_tests PRIVATE
+        -fprofile-instr-generate
+        -fcoverage-mapping
+    )
 
-target_link_libraries(unit_rt_tests PRIVATE
-    ${CPPUTEST_LIB}
-    ${CPPUTEST_EXT_LIB}
-    pthread
-)
+    target_link_libraries(unit_rt_tests PRIVATE
+        ${CPPUTEST_LIB}
+        ${CPPUTEST_EXT_LIB}
+        pthread
+    )
 
-add_test(NAME unit_rt_tests COMMAND unit_rt_tests)
+    add_test(NAME unit_rt_tests COMMAND unit_rt_tests)
+endif()
 
 # ---------------------------------------------------------------------------
 # Clang AST Frontend Plugin (libVeriObjCPlugin.so)
 # ---------------------------------------------------------------------------
+
+# Discover LLVM/Clang portably (override via -DLLVM_DIR=/path/to/lib/cmake/llvm)
+set(_VERIOBJC_LLVM_HINTS "")
+if(CMAKE_CXX_COMPILER)
+    get_filename_component(_VERIOBJC_CXX_REAL "${CMAKE_CXX_COMPILER}" REALPATH)
+    get_filename_component(_VERIOBJC_CXX_BIN "${_VERIOBJC_CXX_REAL}" DIRECTORY)
+    get_filename_component(_VERIOBJC_CXX_PREFIX "${_VERIOBJC_CXX_BIN}" DIRECTORY)
+    list(APPEND _VERIOBJC_LLVM_HINTS
+        "${_VERIOBJC_CXX_PREFIX}/lib/cmake/llvm"
+        "${_VERIOBJC_CXX_PREFIX}/cmake"
+    )
+endif()
+
+find_package(LLVM REQUIRED CONFIG HINTS ${_VERIOBJC_LLVM_HINTS})
+message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} via ${LLVM_DIR}")
+separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
+
+find_package(Clang CONFIG HINTS
+    "${LLVM_DIR}/../clang"
+    "${LLVM_LIBRARY_DIRS}/cmake/clang"
+)
 
 add_library(VeriObjCPlugin MODULE
     compiler/src/VeriObjCPlugin.cpp
@@ -125,7 +186,12 @@ target_include_directories(VeriObjCPlugin PRIVATE
 )
 
 target_include_directories(VeriObjCPlugin SYSTEM PRIVATE
-    /usr/lib/llvm-23/include
+    ${LLVM_INCLUDE_DIRS}
+    ${CLANG_INCLUDE_DIRS}
+)
+
+target_compile_definitions(VeriObjCPlugin PRIVATE
+    ${LLVM_DEFINITIONS_LIST}
 )
 
 target_compile_options(VeriObjCPlugin PRIVATE
@@ -134,7 +200,7 @@ target_compile_options(VeriObjCPlugin PRIVATE
 )
 
 target_link_directories(VeriObjCPlugin PRIVATE
-    /usr/lib/llvm-23/lib
+    ${LLVM_LIBRARY_DIRS}
 )
 
 target_link_libraries(VeriObjCPlugin PRIVATE

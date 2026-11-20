@@ -7,10 +7,10 @@ This guide provides step-by-step instructions on how to configure, build, test, 
 ## 📋 Prerequisites
 
 VeriObjC requires:
-* **Clang / LLVM 23** (`clang-23`, `clang++-23`, `llvm-objdump-23`)
+* **Clang / LLVM 23** (`clang-23`, `clang++-23`, `llvm-objdump-23`; LLVM CMake package discovered via `find_package(LLVM REQUIRED CONFIG)`, configurable with `-DLLVM_DIR=...`)
 * **CMake 3.25+**
 * **Make**
-* **CppUTest** (configurable via `-DCPPUTEST_ROOT=...` or `CPPUTEST_ROOT`, defaulting to `../cpputest`)
+* **CppUTest** (configurable via `-DCPPUTEST_ROOT=...` or `CPPUTEST_ROOT`, defaulting to `../cpputest` or `$HOME/.veriobjc/cpputest`; supports both `cpputest_build/` and `build/` layouts)
 
 Verify your environment:
 ```bash
