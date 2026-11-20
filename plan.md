@@ -8,7 +8,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Phases 0–3 Implemented; Phases 4–5 Partial / In Progress (Task 4.4 SMT solver & `--hw-report` LUT figures are scaffolding; zero-DSP helper call-graph check, Task 5.4 synthesis validation & Task 5.5 mixed-size sealed composition open)
+* **Overall Status:** Phases 0–3 Implemented; Phases 4–5 Partial / In Progress (Task 4.4 SMT solver is scaffolding; transitive helper zero-multiplication check & Task 5.5 mixed-size sealed composition open)
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`clang-23`)
 * **Test Framework:** CppUTest (`CPPUTEST_ROOT`)
 * **Build System:** CMake + Make / Ninja
@@ -173,9 +173,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Lower `y += (w == 1 ? x : w == -1 ? -x : 0)` (`veriobjc_ternary_select`) to a MUX ladder (`veriobjc_cmux`) — never a branch — with accumulation as popcount reduction (`veriobjc_ternary_popcount_reduce`: `sum = popcount(w=+1 lanes) − popcount(w=−1 lanes)`).
   - Lower `reduceTree` (`veriobjc_ternary_dot_512`) to `log2(N)` registered stages (`vstream_latency_contract`); pipeline depth verified as a compile-time latency contract (`ReduceStages: 9`).
   - Positive/negative tests: `test_valid_ternary_dot.m`, `examples/ternary_glu_block.m`.
-- [x] **Task 2.6.3: Elaboration Budgets & `--hw-report` [TDD Cycle 20]** *(scaffolding: constant resource estimate & direct-body `*` check only)*
-  - Elaborate `map` as N parallel hardware copies counted against a manifest-declared LUT budget (`objc_hw_kernel`).
-  - Emit `--hw-report`: LUTs/FFs/BRAMs/DSPs per kernel prefixed with `[PLACEHOLDER: constant estimate]` (`[PLACEHOLDER: constant estimate] [VeriObjC --hw-report] Kernel: ... | DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs)`); **fails the build on direct runtime multiplication in the kernel body** *(transitive helper call-graph zero-DSP checking and wiring to real `setun` synthesis reports remain open)*.
+- [x] **Task 2.6.3: `objc_hw_kernel` Zero-Multiplication AST Gate [TDD Cycle 20]** *(direct-body `*` check only; RTL resource estimation is outside `veriObjC` scope)*
+  - Statically verify `vstream_latency_contract` (`log2(N)` reduce stages) and `vstream_check_context` bounds on `objc_hw_kernel` functions/methods; **fail the build on direct runtime multiplication (`*` / `*=`) in the kernel body** *(transitive helper call-graph zero-multiplication checking remains open; hardware LUT/FF/BRAM/DSP resource reporting is not owned by `veriObjC`)*.
 
 ### 2.7 Ban List Compliance Suite
 *(Mapped to: `docs/veriobjc-ban-list.md` — Centralized Ban Registry & Valid-ObjC Rejection Corpus)*
@@ -278,7 +277,6 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - `--effects-report`: per-line survivor report of effectful call sites.
   - `--branch-report`: classification of proven, hinted (`__builtin_expect`), and unproven data-dependent branches in `@nolatency` / `@pure` functions (`compiler/src/VeriObjCPlugin.cpp`).
   - `--mono-report`: monomorphization byte budget and instantiation tracking.
-  - `--hw-report`: per-kernel fabric resource audit (`[PLACEHOLDER: constant estimate]` on LUTs/FFs/BRAMs until wired to `setun` synthesis reports) with direct-body zero-DSP AST check; *Amendment 4:* emits `VTPEProfile: core | DSPMode: zero-dsp`.
   - Survivor report diff engine (`rt_survivor_diff_audit` in `<rt/survivor_report.h>`, verified in `tests/unit_rt/TestSurvivorReport.cpp` with 100.00% `llvm-cov` coverage) rejecting new `@alloc` effects, surviving effect growth, new unproven branches, monomorphization regressions, and non-zero DSP blocks.
 - [x] **Task 4.3: Latency Budget Gates**
   - CI budget check (`rt_latency_gate_check` in `<rt/latency_gate.h>`, verified in `tests/unit_rt/TestLatencyBudgetGate.cpp` with 100.00% `llvm-cov` coverage): p50/p99/p99.9/teardown regression beyond `noise_band_cycles` fails closed naming the offending benchmark (`bench=<id>`) and commit (`commit=<sha>`).
@@ -295,17 +293,11 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 5.2: Round-Trip Snapshot Persistence**
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check.
   - *Format extraction into the versioned external contract (producers outside this repo) is tracked as Task 5.6a (freeze + golden tapes) / 5.6b (full reconciliation).*
-- [x] **Task 5.3: Ternary Block Elaboration & Direct-Body Zero-DSP Gate** *(scaffolding: `--hw-report` constant LUT estimate; transitive helper zero-DSP check & real synthesis in Task 5.4)*
-  - Compile `examples/ternary_glu_block.m` with `--hw-report`; assert the plugin elaboration check rejects direct `*`/`*=` operators (`DSPs: 0`), `ternary_dot<512>` elaborates to `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) declares `@latency(cycles = 10)` *(LUT/FF/BRAM counts carry `[PLACEHOLDER: constant estimate]`; transitive helper call-graph `*`/`/` checking is not yet enforced)*.
+- [x] **Task 5.3: Ternary Block Elaboration & Direct-Body Zero-Multiplication Gate** *(direct-body `*` check only; transitive helper check open)*
+  - Compile `examples/ternary_glu_block.m` with `veriobjc-check`; assert the plugin's `objc_hw_kernel` AST check rejects direct `*`/`*=` operators, `ternary_dot<512>` verifies `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) declares `@latency(cycles = 10)` *(transitive helper call-graph `*`/`/` checking is not yet enforced)*.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
-- [ ] **Task 5.4: Vendor Synthesis Validation & RTL Equivalence**
-  - *Scope note: Task 5.3 is the plugin-emitted elaboration-level gate (the plugin refuses to emit multiplication, so its own model cannot contain DSPs). This task closes the loop with a real synthesis flow — the original spec's "post-synthesis vendor report" criterion.*
-  - Named, version-pinned synthesis toolchain (vendor HLS or open flow) invoked from CI; **DSP = 0 and BRAM weight-pinning read from the vendor utilization report**, not the plugin's self-report.
-  - Timing closure at the target clock against the declared `@latency(cycles = 9)` for `ternary_dot<512>` and `@latency(cycles = 10)` for `TernaryGLUBlock`; C/RTL cosimulation equivalence for `examples/ternary_glu_block.m` against the C model over a test corpus.
-  - Cosim oracle: the quantized reference interpreter from the external TernaryTape.jl project (a conforming producer of the Tape Format Spec, unblocked by Task 5.6a) supplies the golden model — consumed as committed fixtures; **no Julia toolchain enters VeriObjC CI**.
-  - Negative test: corrupted weight tape rejected by `veriobjc_from_bytes` → kernel never loads, nothing reaches the hardware boundary.
-  - Manifest-declared LUT budget checked against the vendor's LUT count (depends on Phase 6 manifest).
-  - Acceptance: synthesis report, utilization table, and cosim log committed as reproducible artifacts; any DSP block or timing violation fails the build.
+- [ ] **Task 5.4: Vendor Synthesis Validation & RTL Equivalence** *(out of `veriObjC` scope — hardware synthesis & RTL resource reporting belong outside `veriObjC`)*
+  - *Scope note: RTL synthesis, LUT/FF/BRAM/DSP resource reporting, timing closure, and RTL co-simulation are owned by the hardware repository, never estimated or stood in for inside `veriObjC`.*
 - [ ] **Task 5.5: Mixed-Size Sealed Hierarchy Composition Test (Upcast Dispatch + Scope Reset)**
   - *The seam found in external review: every ingredient is tested separately (sealed dispatch, one-store reset, root safety), but never the composition. A claim that isn't tested isn't a claim.*
   - Scenario: multiple concrete subclasses of one sealed hierarchy, **with differing ivar counts and sizes**, allocated within a single `@scoped` block on one data stack and referenced through **superclass-typed pointers**.
@@ -347,8 +339,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Content-addressed store for artifacts (weight tapes, snapshot images) with manifest-recorded provenance (training run ID, quantization params, hash).
   - Provenance is **producer-agnostic**: any conforming encoder (TernaryTape.jl/Lux, PyTorch/BitNet-style, C++ tools) may write artifacts; the store and loader depend only on the Tape Format Spec (Task 5.6a/b), never on a producer's toolchain.
 - [ ] **Task 6.2: Manifest & Budget Enforcement**
-  - Manifest-declared budgets actually enforced at build time: instantiation and generated-code bytes (Task 2.8.5), `vregex` table bytes, generated-data budget, and the LUT budget (Task 2.6.3).
+  - Manifest-declared budgets actually enforced at build time: instantiation and generated-code bytes (Task 2.8.5), `vregex` table bytes, and generated-data budget.
   - Exceeding any budget fails the build naming the package and the offending item.
 - [ ] **Task 6.3: CI Report Publication & Diffing**
-  - `--effects-report`, `--branch-report`, `--mono-report`, and `--hw-report` published as per-build artifacts and diffed against the previous build (supplies the plumbing for Task 4.2's gates).
+  - `--effects-report`, `--branch-report`, and `--mono-report` published as per-build artifacts and diffed against the previous build (supplies the plumbing for Task 4.2's gates).
   - A certified loop that gains an effect, an unproven branch, or an instantiation fails review even when all tests pass.

@@ -46,7 +46,7 @@ The registry (`docs/veriobjc-ban-list.md`) and the test suite are kept in lockst
 
 ## 📊 Report Discipline
 
-`--effects-report`, `--branch-report`, `--mono-report`, and `--hw-report` are CI artifacts, diffed per build:
+`--effects-report`, `--branch-report`, and `--mono-report` are CI artifacts, diffed per build:
 
 - A certified hot loop that *gains* an effect, an unproven branch, or an instantiation fails CI even when all tests pass. Do not "fix" this by editing the report expectations — fix the code or renegotiate the budget in the manifest, in the PR, out loud.
 - Latency budgets are versioned artifacts reviewed like code. A p99 regression beyond the measured noise band fails the build, naming the commit.
@@ -70,7 +70,7 @@ The registry (`docs/veriobjc-ban-list.md`) and the test suite are kept in lockst
 - [ ] New bans: registry row + rejection-corpus file + diagnostic-compliance test
 - [ ] Coverage audit attached for runtime changes (100% region/function/branch)
 - [ ] Disassembly audit attached for any generated-code claim
-- [ ] Report diffs clean (`--effects-report`, `--branch-report`, `--mono-report`, `--hw-report`)
+- [ ] Report diffs clean (`--effects-report`, `--branch-report`, `--mono-report`)
 - [ ] No performance claims without a benchmark ID from CI artifacts
 - [ ] Docs updated in the same PR (spec section, registry, mapped notes in the TDD plan)
 

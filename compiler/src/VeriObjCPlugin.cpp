@@ -34,7 +34,6 @@ using namespace clang;
 namespace {
 
 struct VeriObjCPluginOptions {
-    bool EmitHwReport = false;
     bool EmitEffectsReport = false;
     bool EmitBranchReport = false;
     bool EmitMonoReport = false;
@@ -236,7 +235,6 @@ private:
     std::vector<Decl *> SynthesizedVarDefs;
     llvm::DenseMap<const VarDecl *, std::string> SPSCChannelProducer;
     unsigned DFACounter = 0;
-    unsigned LastReduceStages = 0;
 
     // -----------------------------------------------------------------------
     // Diagnostic & AST Construction Helpers
@@ -1550,8 +1548,6 @@ private:
         if (Cycles != Expected) {
             reportError(E->getExprLoc(), "VeriObjC Violation: Adder tree latency mismatch: width %0 requires %1 cycles (clog2), but %2 cycles were declared.")
                 << static_cast<int>(WidthN) << static_cast<int>(Expected) << static_cast<int>(Cycles);
-        } else {
-            LastReduceStages = static_cast<unsigned>(Cycles);
         }
     }
 
@@ -1565,16 +1561,6 @@ private:
         }
         for (const Stmt *Child : S->children()) {
             verifyHwKernelNoMultiply(Child, KernelName);
-        }
-    }
-
-    void auditHwKernelAndReport(const Stmt *Body, llvm::StringRef KernelName) {
-        verifyHwKernelNoMultiply(Body, KernelName);
-        if (!Context->getDiagnostics().hasErrorOccurred() && Opts.EmitHwReport) {
-            unsigned Stages = LastReduceStages > 0 ? LastReduceStages : 9;
-            llvm::errs() << "[PLACEHOLDER: constant estimate] [VeriObjC --hw-report] Kernel: " << KernelName
-                         << " | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: "
-                         << Stages << " | Status: PASS (0 DSPs) | VTPEProfile: core | DSPMode: zero-dsp\n";
         }
     }
 
@@ -2436,7 +2422,7 @@ public:
             collectErrorReturnGraph(FD->getBody(), FD->getCanonicalDecl());
             if (!analyzeAndRewriteBody(FD->getBody(), FD)) return;
             if (hasVeriObjCAnnotation(FD, "objc_hw_kernel")) {
-                auditHwKernelAndReport(FD->getBody(), FD->getName());
+                verifyHwKernelNoMultiply(FD->getBody(), FD->getName());
             }
             return;
         }
@@ -2454,7 +2440,7 @@ public:
             if (hasVeriObjCAnnotation(MD, "objc_hw_kernel") ||
                 (IfaceMD && hasVeriObjCAnnotation(IfaceMD, "objc_hw_kernel"))) {
                 std::string KernelName = (ID->getName() + "::" + MD->getSelector().getAsString()).str();
-                auditHwKernelAndReport(OrigBody, KernelName);
+                verifyHwKernelNoMultiply(OrigBody, KernelName);
             }
             replaceMethodWithDirectForwarding(ID, MD, OrigBody);
         }
@@ -2746,14 +2732,22 @@ protected:
         return std::make_unique<VeriObjCConsumer>(CI, Opts);
     }
 
-    bool ParseArgs(const CompilerInstance &, const std::vector<std::string> &args) override {
+    bool ParseArgs(const CompilerInstance &CI, const std::vector<std::string> &args) override {
         for (const std::string &A : args) {
-            if (A == "--hw-report") Opts.EmitHwReport = true;
-            else if (A == "--effects-report") Opts.EmitEffectsReport = true;
+            if (A == "--effects-report") Opts.EmitEffectsReport = true;
             else if (A == "--branch-report") Opts.EmitBranchReport = true;
             else if (A == "--mono-report") Opts.EmitMonoReport = true;
             else if (A == "--export-header-stdout") Opts.EmitExportHeader = true;
             else if (A == "--smt-report") Opts.EmitSmtReport = true;
+            else {
+                DiagnosticsEngine &Diag = CI.getDiagnostics();
+                unsigned ID = Diag.getCustomDiagID(
+                    DiagnosticsEngine::Error,
+                    "VeriObjC Plugin: unknown argument '%0'"
+                );
+                Diag.Report(ID) << A;
+                return false;
+            }
         }
         return true;
     }

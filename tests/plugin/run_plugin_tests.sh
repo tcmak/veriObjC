@@ -61,20 +61,13 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
         fi
     fi
     if [[ "$(basename "$pos_file")" == "test_valid_ternary_dot.m" ]]; then
-        HW_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --hw-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
-        if ! echo "$HW_OUT" | grep -q "^\[PLACEHOLDER: constant estimate\] \[VeriObjC --hw-report\]"; then
-            echo "[FAIL] Expected --hw-report to be prefixed with '[PLACEHOLDER: constant estimate]' in test_valid_ternary_dot.m!"
-            echo "$HW_OUT"
+        if UNK_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --unsupported-plugin-flag -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1); then
+            echo "[FAIL] Expected VeriObjCPlugin to reject unknown plugin argument!"
             exit 1
         fi
-        if ! echo "$HW_OUT" | grep -q "DSPs: 0 | ReduceStages: 9 | Status: PASS"; then
-            echo "[FAIL] Expected --hw-report to show DSPs: 0 and ReduceStages: 9 in test_valid_ternary_dot.m!"
-            echo "$HW_OUT"
-            exit 1
-        fi
-        if ! echo "$HW_OUT" | grep -q "VTPEProfile: core | DSPMode: zero-dsp"; then
-            echo "[FAIL] Expected --hw-report to include Amendment 4 VTPEProfile and DSPMode fields in test_valid_ternary_dot.m!"
-            echo "$HW_OUT"
+        if ! echo "$UNK_OUT" | grep -q "VeriObjC Plugin: unknown argument"; then
+            echo "[FAIL] Expected unknown plugin argument diagnostic!"
+            echo "$UNK_OUT"
             exit 1
         fi
     fi

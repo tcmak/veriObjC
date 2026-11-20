@@ -22,7 +22,7 @@ This directory contains two complementary sets of programs:
 | [`constrained_generic_vault.m`](./constrained_generic_vault.m) | **Definition-Site Checked Constrained Generics (`vgeneric`):** Declares `TelemetryVault<T : TelemetryPayload *>` where the type parameter `T` is constrained to a sealed hierarchy (`TelemetryPayload` / `ImuTelemetry`). | Plugin verifies the sealed constraint bound at the `@interface` definition site and devirtualizes all method calls on `T` without type erasure or `id` boxing. |
 | [`vconstexpr_tick_table.m`](./vconstexpr_tick_table.m) | **Fueled Compile-Time Evaluation (`vconstexpr`):** Computes recursive tick-scaling factors (`compute_tick_scale`, ` accumulate_schedule_budget`) at compile time under a strict step/depth fuel budget (`MAX_STEPS = 4096`, `MAX_DEPTH = 64`). | Plugin evaluates `vconstexpr` calls in the AST with memoization and folds them directly into `IntegerLiteral` constants before code generation. |
 | [`fix_protocol_dfa_router.m`](./fix_protocol_dfa_router.m) | **Compile-Time Regular Expressions (`vregex`) to `.rodata` DFA:** Matches financial FIX protocol tags (`"8=FIX42\\|35=[A-Z0-9]+\\|"` and `"35=D\\|49=[A-Z]+\\|"`) using `vregex_match`. | Plugin compiles each regex via Thompson NFA -> Powerset Construction -> Hopcroft Minimization into `static const` transition tables in `.rodata` (`__veriobjc_dfa_trans_*`) walked in branchless $O(1)$ time per byte (`veriobjc_dfa_match`). |
-| [`ternary_glu_block.m`](./ternary_glu_block.m) | **Hardware Stream Elaboration (`veriStream`) & Zero-DSP Ternary Datapath:** Implements a 512-lane ternary `{−1, 0, +1}` GLU block (`TernaryGLUBlock`) with `vstream_def`, `veriobjc_clog2(512)` latency contract verification (`9` stages), `veriobjc_from_bytes` weight provenance verification, and `veriobjc_ternary_dot_512` CMUX + popcount reduction. | Verified under `--hw-report` to instantiate **0 DSP blocks** (`DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs)`) with zero runtime multiplications. |
+| [`ternary_glu_block.m`](./ternary_glu_block.m) | **Hardware Stream Elaboration (`veriStream`) & Zero-Multiplication Ternary Datapath:** Implements a 512-lane ternary `{−1, 0, +1}` GLU block (`TernaryGLUBlock`) with `vstream_def`, `veriobjc_clog2(512)` latency contract verification (`9` stages), `veriobjc_from_bytes` weight provenance verification, and `veriobjc_ternary_dot_512` CMUX + popcount reduction. | Verified under `veriobjc-check` (`objc_hw_kernel`) to contain zero direct runtime multiplications and zero dynamic dispatch symbols. |
 | [`static_dag_soa_pipeline.m`](./static_dag_soa_pipeline.m) | **Effect System, FFI `@export`, `@reflect`/SoA, `vvariant`/`vmatch`, `vtrait`, Static Task DAGs (`vasync`) & Built-in-Place Construction:** Showcases Section 2.8 capabilities including `@nolatency`/`@pure`/`@cold` effect verification, `@export` header generation, `vsoa_def3` struct-of-arrays, exhaustive `vmatch`, deduplicated monomorphization, compile-time DAG critical-path WCET folding, stack-allocated `vasync`, and `veriobjc_push_inplace`. | Verified under `--effects-report`, `--mono-report`, and `--export-header-stdout` with `0` dynamic dispatch symbols and `0` heap allocations. |
 | [`vstring_view_intro.m`](./vstring_view_intro.m) | **Task 3.1 (`<vstd/string.h>`, `<vstd/span.h>`):** Zero-copy `vstring_view`, bounded `vfixed_string_def`, and contiguous DMA slice `vspan_def` (`vspan_from_array`, `vspan_at`). | `clang-23 -I./rt/include -I./vstd/include -c examples/vstring_view_intro.m` — `0` allocations, `0` dynamic symbols. |
 | [`vstrong_order_types.m`](./vstrong_order_types.m) | **Task 3.6 (`<vstd/strong.h>`):** Nominal `vstrong_def` newtypes (`TickPrice`, `LotSize`, `SequenceId`) with explicit construction/unwrap and `auto` preservation. | `clang-23 -I./rt/include -I./vstd/include -c examples/vstrong_order_types.m` — `0` implicit conversions. |
@@ -133,20 +133,15 @@ Audit the emitted object file with `nm` to verify **0 dynamic Objective-C or blo
 nm build/simd_range_filter.o
 ```
 
-#### 2. Compile a Hardware Stream Kernel (`veriStream`) with `--hw-report`
-Pass `-Xclang -plugin-arg-veriobjc-check -Xclang --hw-report` to emit the hardware synthesis resource and zero-DSP audit report:
+#### 2. Compile a Hardware Stream Kernel (`veriStream`) with `veriobjc-check`
+Compile `ternary_glu_block.m` with `veriobjc-check` to enforce `objc_hw_kernel` zero-multiplication checking, `vstream_latency_contract`, and `vstream_check_context` at compile time:
 ```bash
 clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -Wno-objc-root-class -fblocks \
          -Xclang -load -Xclang build/libVeriObjCPlugin.so \
          -Xclang -add-plugin -Xclang veriobjc-check \
-         -Xclang -plugin-arg-veriobjc-check -Xclang --hw-report \
          -I./rt/include \
          -c examples/ternary_glu_block.m \
          -o build/ternary_glu_block.o
-```
-Expected `--hw-report` output:
-```text
-[PLACEHOLDER: constant estimate] [VeriObjC --hw-report] Kernel: TernaryGLUBlock::forward:prev:gateTape:tapeLen:upTape:upTapeLen: | LUTs: 2048 | FFs: 512 | BRAMs: 2 | DSPs: 0 | ReduceStages: 9 | Status: PASS (0 DSPs) | VTPEProfile: core | DSPMode: zero-dsp
 ```
 
 #### 3. Inspect `.rodata` DFA Tables on the Regex Router Example

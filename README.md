@@ -79,7 +79,7 @@ __attribute__((objc_sealed))
 @end
 ```
 
-Full examples: [`examples/`](examples/) — fixed-point audio processing, the market-data parser above, and a matmul-free ternary-inference block for FPGA synthesis (direct-body `*` check enforced; transitive helper zero-DSP analysis and vendor synthesis report wiring pending).
+Full examples: [`examples/`](examples/) — fixed-point audio processing, the market-data parser above, and a matmul-free ternary-inference block (`objc_hw_kernel` direct-body `*` check enforced; transitive helper zero-multiplication analysis pending).
 
 ---
 
@@ -102,7 +102,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 - **Bounded-path proofs, honestly stated.** `@pre`/`@post` contracts and memory-safety obligations target discharge by SMACK/Z3 across bounded paths before codegen *(scaffolding only today: `--smt-report` emits `UNIMPLEMENTED_STUB` obligations with no external solver invoked, and `rt_contract_eval_endpoints_stub` evaluates affine interval endpoints only)*. We target bounded-path verification — *not* mathematical totality (undecidable) and *not* Rust's whole-language soundness (a different, per-function, open-world guarantee).
 - **Effects are typed.** `@alloc`/`@io`/`@blocking`/`@fence`/`@shared-retain` are part of every signature; an effectful call inside a `@nolatency` loop is a compile error.
-- **Reports are CI artifacts.** `--effects-report`, `--branch-report`, `--mono-report`, and `--hw-report` *(LUT/FF/BRAM figures currently `[PLACEHOLDER: constant estimate]` until wired to `setun` synthesis reports)* are diffed per build: a hot loop that *gains* an effect or an unproven branch fails review even when all tests pass.
+- **Reports are CI artifacts.** `--effects-report`, `--branch-report`, and `--mono-report` are diffed per build: a hot loop that *gains* an effect or an unproven branch fails review even when all tests pass.
 - **No number, no claim.** Latency budgets are versioned artifacts; benchmarks publish losses alongside wins, matching the measurement discipline common among HFT firms.
 
 ---
@@ -111,10 +111,10 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 | Area | State |
 | :--- | :--- |
-| **Phases 0–2** (toolchain, micro-runtime, Clang plugin: bans, direct-receiver devirtualization, lowering, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` AST elaboration, ban corpus) | ✅ Implemented — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov` *(CFG-based escape/move & transitive zero-DSP helper checks tracked for hardening)* |
+| **Phases 0–2** (toolchain, micro-runtime, Clang plugin: bans, direct-receiver devirtualization, lowering, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` AST elaboration, ban corpus) | ✅ Implemented — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov` *(CFG-based escape/move & transitive zero-multiplication helper checks tracked for hardening)* |
 | **Phase 3** (`vstd/`, `sys0/`, `hw/`, `<vstd/contracts.h>`, `<vstd/simd.h>`, `<vstd/io.h>`, header-closure & minimal-binary cohesion gate) | ✅ Implemented — verified by `unit_rt_tests`, `plugin_tests`, `ban_corpus_tests`, and `vstd_cohesion_tests` |
-| **Phase 4** (cycle benchmark harness, survivor report diff engine, latency budget gate, contract verification) | 🟡 Partial / Scaffolding — bench harness, survivor diff, and latency gate pass unit tests; **Task 4.4 (SMACK/Z3 solver)** is **scaffolding only** (`--smt-report` emits `UNIMPLEMENTED_STUB` with no external solver invoked; `rt_contract_eval_endpoints_stub` checks affine endpoints only); `--hw-report` resource numbers are `[PLACEHOLDER: constant estimate]` |
-| **Phase 5** (examples smoke suite, `VOBJ` snapshot persistence, ternary zero-DSP gate, synthesis & hierarchy composition) | 🟡 Partial / In Progress — Tasks 5.1–5.2 pass; **Task 5.3 (`--hw-report` zero-DSP gate)** checks direct kernel-body `*` only (**transitive helper calls not yet checked**, constant LUT/FF/BRAM placeholder); **Task 5.4** (real vendor/open synthesis report & RTL equivalence) and **Task 5.5** (mixed-size `@sealed` upcast dispatch + `@scoped` reset composition) are **⬜ Incomplete** |
+| **Phase 4** (cycle benchmark harness, survivor report diff engine, latency budget gate, contract verification) | 🟡 Partial / Scaffolding — bench harness, survivor diff, and latency gate pass unit tests; **Task 4.4 (SMACK/Z3 solver)** is **scaffolding only** (`--smt-report` emits `UNIMPLEMENTED_STUB` with no external solver invoked; `rt_contract_eval_endpoints_stub` checks affine endpoints only) |
+| **Phase 5** (examples smoke suite, `VOBJ` snapshot persistence, ternary zero-multiplication check, sealed hierarchy composition) | 🟡 Partial / In Progress — Tasks 5.1–5.2 pass; **Task 5.3 (`objc_hw_kernel` zero-multiplication check)** inspects direct kernel-body `*` only (**transitive helper calls not yet checked**); **Task 5.4** (external hardware synthesis — out of `veriObjC` scope) and **Task 5.5** (mixed-size `@sealed` upcast dispatch + `@scoped` reset composition) are **⬜ Incomplete** |
 | **Phase 6** (`vpm` & manifest) | ⬜ Planned |
 | **Toolchain** | Clang / LLVM 23.1.5, CppUTest, CMake |
 | **Production usage** | None. This is a research bet that the *impossible list* is worth the closed world. |

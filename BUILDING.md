@@ -66,7 +66,7 @@ Executes the positive test cases (verifying `0` calls to `objc_msgSend`, `objc_m
 ```
 
 ### 3. Examples Smoke & Acceptance Test Suite (`examples_smoke_tests`)
-Compiles all `.m` (`audio_pipeline.m`, `sealed_synth_hierarchy.m`, `linear_channel_router.m`, `simd_range_filter.m`, `multiframe_packet_parser.m`, `non_escaping_block_pipeline.m`, `constrained_generic_vault.m`, `vconstexpr_tick_table.m`, `fix_protocol_dfa_router.m`, `ternary_glu_block.m`) and `.c` (`kernel_dma_batch.c`, `order_book_snapshot.c`) files in `examples/` with `-O2 -Werror -fblocks` and the Clang plugin (including `--hw-report` zero-DSP verification), auditing emitted `.o` binaries via `nm` for zero dynamic dispatch calls, zero block runtime dependencies, and zero external `libc` dependencies:
+Compiles all `.m` (`audio_pipeline.m`, `sealed_synth_hierarchy.m`, `linear_channel_router.m`, `simd_range_filter.m`, `multiframe_packet_parser.m`, `non_escaping_block_pipeline.m`, `constrained_generic_vault.m`, `vconstexpr_tick_table.m`, `fix_protocol_dfa_router.m`, `ternary_glu_block.m`) and `.c` (`kernel_dma_batch.c`, `order_book_snapshot.c`) files in `examples/` with `-O2 -Werror -fblocks` and the Clang plugin (including compile-time `objc_hw_kernel` zero-multiplication verification), auditing emitted `.o` binaries via `nm` for zero dynamic dispatch calls, zero block runtime dependencies, and zero external `libc` dependencies:
 
 ```bash
 ./tests/integration/run_examples_smoke_test.sh build/libVeriObjCPlugin.so .
