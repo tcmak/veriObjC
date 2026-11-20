@@ -20,7 +20,7 @@ TEST(SurvivorReportGroup, SurvivorDiffBlocksNewAllocEffectsUnprovenBranchesAndMo
     base.hw_ffs = 512u;
     base.hw_brams = 2u;
     base.hw_dsp_blocks = 0u;
-    base.ttape_profile = TTAPE_PROFILE_CORE;
+    base.kernel_tier = RT_BENCH_TIER_CORE;
     base.dsp_mode = RT_BENCH_DSP_ZERO;
 
     struct rt_survivor_diff_result res;
@@ -82,14 +82,14 @@ TEST(SurvivorReportGroup, SurvivorDiffBlocksNewAllocEffectsUnprovenBranchesAndMo
     LONGS_EQUAL(RT_SURVIVOR_DIFF_INVALID_ARG, rt_survivor_diff_audit(&base, &bad_fn, &res));
 
     struct rt_survivor_snapshot grp_prof = base;
-    grp_prof.ttape_profile = TTAPE_PROFILE_GROUPED;
+    grp_prof.kernel_tier = RT_BENCH_TIER_GROUPED;
     LONGS_EQUAL(RT_SURVIVOR_DIFF_OK, rt_survivor_diff_audit(&base, &grp_prof, &res));
 
     struct rt_survivor_snapshot ext_prof = base;
-    ext_prof.ttape_profile = TTAPE_PROFILE_EXTENDED;
+    ext_prof.kernel_tier = RT_BENCH_TIER_EXTENDED;
     LONGS_EQUAL(RT_SURVIVOR_DIFF_OK, rt_survivor_diff_audit(&base, &ext_prof, &res));
 
     struct rt_survivor_snapshot bad_prof = base;
-    bad_prof.ttape_profile = static_cast<ttape_v1_profile_t>(99);
+    bad_prof.kernel_tier = static_cast<enum rt_bench_kernel_tier>(99);
     LONGS_EQUAL(RT_SURVIVOR_DIFF_INVALID_ARG, rt_survivor_diff_audit(&base, &bad_prof, &res));
 }

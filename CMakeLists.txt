@@ -56,6 +56,7 @@ find_library(CPPUTEST_EXT_LIB
 #   vstd -> rt, vstd
 #   sys0 -> rt, sys0
 #   hw   -> rt, sys0, hw
+#   host -> rt, host
 add_library(veriobjc_rt INTERFACE)
 target_include_directories(veriobjc_rt INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
@@ -83,7 +84,7 @@ add_library(veriobjc_host INTERFACE)
 target_include_directories(veriobjc_host INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/host/include
 )
-target_link_libraries(veriobjc_host INTERFACE veriobjc_vstd veriobjc_rt)
+target_link_libraries(veriobjc_host INTERFACE veriobjc_rt)
 
 if(BUILD_TESTING)
     if(NOT CPPUTEST_INCLUDE_DIRS OR NOT CPPUTEST_LIB OR NOT CPPUTEST_EXT_LIB)
@@ -106,8 +107,6 @@ if(BUILD_TESTING)
         tests/unit_rt/TestVstdWave1.cpp
         tests/unit_rt/TestVstdWave2And3.cpp
         tests/unit_rt/TestVstdWave4And5.cpp
-        tests/unit_rt/TestTtapeGoldenCorpus.cpp
-        tests/unit_rt/TestVeriStreamRuntimeSlice.cpp
         tests/unit_rt/TestBenchHarness.cpp
         tests/unit_rt/TestSurvivorReport.cpp
         tests/unit_rt/TestLatencyBudgetGate.cpp

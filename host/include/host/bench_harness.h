@@ -2,11 +2,16 @@
 #define VERIOBJC_HOST_BENCH_HARNESS_H
 
 #include "veriobjc_runtime.h"
-#include "vstd/ttape_reader.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+enum rt_bench_kernel_tier {
+    RT_BENCH_TIER_CORE = 0,
+    RT_BENCH_TIER_GROUPED = 1,
+    RT_BENCH_TIER_EXTENDED = 2
+};
 
 enum rt_bench_dsp_mode {
     RT_BENCH_DSP_ZERO = 0,
@@ -29,7 +34,7 @@ struct rt_bench_m6_record {
     uint16_t shape_k;
     const char *cited_baseline;
     uint32_t dollar_norm_cents;
-    ttape_v1_profile_t ttape_profile;
+    enum rt_bench_kernel_tier kernel_tier;
     enum rt_bench_dsp_mode dsp_mode;
     struct rt_bench_stats stats;
 };
@@ -90,9 +95,9 @@ static inline int rt_bench_validate_m6_record(const struct rt_bench_m6_record *r
     if (rec->dollar_norm_cents == 0u) {
         return 0;
     }
-    if (rec->ttape_profile != TTAPE_PROFILE_CORE &&
-        rec->ttape_profile != TTAPE_PROFILE_GROUPED &&
-        rec->ttape_profile != TTAPE_PROFILE_EXTENDED) {
+    if (rec->kernel_tier != RT_BENCH_TIER_CORE &&
+        rec->kernel_tier != RT_BENCH_TIER_GROUPED &&
+        rec->kernel_tier != RT_BENCH_TIER_EXTENDED) {
         return 0;
     }
     if (rec->dsp_mode != RT_BENCH_DSP_ZERO && rec->dsp_mode != RT_BENCH_DSP_ENABLED) {
@@ -132,10 +137,10 @@ static inline int rt_bench_format_m6_line(
     if (!out_buf || out_cap < 160u || !rt_bench_validate_m6_record(rec)) {
         return 0;
     }
-    const char *prof_str =
-        (rec->ttape_profile == TTAPE_PROFILE_EXTENDED)
+    const char *tier_str =
+        (rec->kernel_tier == RT_BENCH_TIER_EXTENDED)
             ? "extended"
-            : ((rec->ttape_profile == TTAPE_PROFILE_GROUPED) ? "grouped" : "core");
+            : ((rec->kernel_tier == RT_BENCH_TIER_GROUPED) ? "grouped" : "core");
     const char *dsp_str =
         (rec->dsp_mode == RT_BENCH_DSP_ENABLED) ? "dsp-enabled" : "zero-dsp";
 
@@ -152,8 +157,8 @@ static inline int rt_bench_format_m6_line(
     p = rt_bench_append_str(out_buf, p, rec->cited_baseline);
     p = rt_bench_append_str(out_buf, p, " dollar_cents=");
     p = rt_bench_append_u64(out_buf, p, rec->dollar_norm_cents);
-    p = rt_bench_append_str(out_buf, p, " ttape_profile=");
-    p = rt_bench_append_str(out_buf, p, prof_str);
+    p = rt_bench_append_str(out_buf, p, " kernel_tier=");
+    p = rt_bench_append_str(out_buf, p, tier_str);
     p = rt_bench_append_str(out_buf, p, " dsp_mode=");
     p = rt_bench_append_str(out_buf, p, dsp_str);
     p = rt_bench_append_str(out_buf, p, " p50=");

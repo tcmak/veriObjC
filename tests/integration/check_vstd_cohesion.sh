@@ -98,10 +98,10 @@ for hdr in "$REPO_ROOT"/hw/include/hw/*.h; do
     fi
 done
 
-# 5. Layer 'host': host benchmarking, scheduler & report tooling; may import rt, vstd, host ONLY (never sys0 or hw)
+# 5. Layer 'host': host benchmarking, latency gate & report tooling; may import rt and host ONLY (never vstd, sys0, or hw)
 for hdr in "$REPO_ROOT"/host/include/host/*.h; do
-    check_header_layer "$hdr" "host" "(sys0/|hw/)" \
-        -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/host/include"
+    check_header_layer "$hdr" "host" "(vstd/|sys0/|hw/)" \
+        -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/host/include"
 done
 
 # 5. Negative Self-Test: Verify gate rejects a synthetic leaf header with an illegal cross-layer include (both C and Objective-C halves)

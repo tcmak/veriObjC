@@ -30,7 +30,7 @@ struct rt_survivor_snapshot {
     uint32_t hw_ffs;
     uint32_t hw_brams;
     uint32_t hw_dsp_blocks;
-    ttape_v1_profile_t ttape_profile;
+    enum rt_bench_kernel_tier kernel_tier;
     enum rt_bench_dsp_mode dsp_mode;
 };
 
@@ -48,9 +48,9 @@ static inline enum rt_survivor_diff_status rt_survivor_diff_audit(
         !baseline->function_or_kernel || !candidate->function_or_kernel) {
         return RT_SURVIVOR_DIFF_INVALID_ARG;
     }
-    if (candidate->ttape_profile != TTAPE_PROFILE_CORE &&
-        candidate->ttape_profile != TTAPE_PROFILE_GROUPED &&
-        candidate->ttape_profile != TTAPE_PROFILE_EXTENDED) {
+    if (candidate->kernel_tier != RT_BENCH_TIER_CORE &&
+        candidate->kernel_tier != RT_BENCH_TIER_GROUPED &&
+        candidate->kernel_tier != RT_BENCH_TIER_EXTENDED) {
         return RT_SURVIVOR_DIFF_INVALID_ARG;
     }
 

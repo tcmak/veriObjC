@@ -22,7 +22,7 @@ TEST(LatencyBudgetGateGroup, LatencyGatePassesWithinNoiseBandAndFailsClosedOnReg
     rec.shape_k = 16u;
     rec.cited_baseline = "clang23_std_vector_O3";
     rec.dollar_norm_cents = 29900u;
-    rec.ttape_profile = TTAPE_PROFILE_CORE;
+    rec.kernel_tier = RT_BENCH_TIER_CORE;
     rec.dsp_mode = RT_BENCH_DSP_ZERO;
     rec.stats.min_cycles = 16u;
     rec.stats.p50_cycles = 22u;  // 20 + 2 <= 20 + 3 (within noise band)

@@ -2,10 +2,10 @@
 
 `veriObjC` is a deterministic, zero-runtime-overhead Objective-C subset compiler plugin (`compiler/`), freestanding runtime (`rt/`), and verifiable standard library (`vstd/`).
 
-## 1. Portfolio Ownership & Boundaries
+## 1. Standalone Repository Scope & Boundaries
 
-* **`veriObjC` OWNS:** Language subset bans & static lowering (`compiler/`), strictly freestanding runtime (`rt/`), `vobj_v1` `RelPtr` container (`fixtures/vobj_v1/`), `vstd/` containers, `ttape_reader.h` consumer, and pure-CPU software fallback kernels.
-* **`veriObjC` DOES NOT OWN:** The `TTAPE` specification or `.ttape` golden fixture generator (`TernaryTape.jl`), Setun hardware register definitions (`csr.h` / `csr.json` must come from `setun`, never hand-invented), RTL LUT estimators, or co-simulation oracles (`setun/ref/` is the sole oracle).
+* **`veriObjC` OWNS:** Language subset bans & static lowering (`compiler/`), strictly freestanding runtime (`rt/`), `vobj_v1` `RelPtr` container (`fixtures/vobj_v1/`), `vstd/` containers and pure-CPU round-half-up software fallback kernels (`vstd/include/vstd/ternary.h`), `sys0/`/`hw/` freestanding substrates, and `host/` benchmark/audit headers. `veriObjC` is completely standalone with **zero** external repository dependencies or git submodules.
+* **`veriObjC` DOES NOT OWN:** External model weight container specifications or wire parsers, FPGA hardware RTL or register maps, RTL LUT estimators, or hardware co-simulation oracles.
 
 ---
 
@@ -42,7 +42,7 @@
    * Every plugin ban ships with an adversarial escape corpus (aliases, struct fields, globals, out-params, `&inner[0]`, helper functions, loop back-edges) alongside branch-symmetric positive tests.
 
 6. **Collect benchmarks, claim nothing (Zero Certification Theater).**
-   Record cycle counts in the host bench harness as raw artifacts; publish no unverified claims. Never emit `UNSAT_VERIFIED` without invoking a real SMT solver, never print constant LUT numbers as hardware reports, and never certify sibling repos (`setun`, `TernaryTape.jl`) with local stand-ins.
+   Record cycle counts in the host bench harness as raw artifacts; publish no unverified claims. Never emit `UNSAT_VERIFIED` without invoking a real SMT solver, never print constant LUT numbers as hardware reports, and never certify external repositories with local stand-ins.
 
 7. **Every task ships runnable positive + banned examples.**
    Each feature task adds at least one runnable example under `examples/` and at least one *illegal* example under `examples/banned/` that the plugin must reject, updating `examples/README.md` in the same commit. An example that fails to build—or a banned example that *succeeds*—is a broken gate.
