@@ -94,14 +94,48 @@ static inline bool vternary_verify_weights_from_bytes(
     return true;
 }
 
-// Combinational (0-cycle) GLU mux gate: selects main_val when gate_sign > 0
+//Combinational (0-cycle) GLU mux gate: selects main_val when gate_sign > 0
 static inline int32_t vternary_glu_mux_gate(int32_t main_val, int32_t gate_sign) {
     return (gate_sign > 0) ? main_val : 0;
 }
 
-// Shift-only power-of-two RMSNorm scaling (zero multipliers / zero DSPs)
+// Round-half-up arithmetic right shift matching setun/docs/NUMERICS.md §2.4:
+//   shift == 0 -> val
+//   shift > 0  -> (val + (1 << (shift - 1))) >> shift
+static inline int32_t vternary_round_shift_right(int64_t val, uint32_t shift) {
+    uint32_t sh = shift & 31u;
+    if (sh == 0u) {
+        return (int32_t)val;
+    }
+    int64_t bias = 1LL << (sh - 1u);
+    return (int32_t)((val + bias) >> sh);
+}
+
+// Shift-only power-of-two RMSNorm scaling with round-half-up (zero multipliers)
 static inline int32_t vternary_rmsnorm_shift(int32_t val, uint32_t shift_bits) {
-    return val >> (shift_bits & 31u);
+    return vternary_round_shift_right((int64_t)val, shift_bits);
+}
+
+// Pure CPU software fallback 512-lane ternary dot product with round-half-up right shift.
+// Note: Hardware RTL/CSR definitions and co-simulation oracles live exclusively in setun.
+static inline int32_t veriobjc_ternary_dot_512(
+    const int8_t *activations,
+    const uint8_t *packed_weights_128,
+    uint32_t shift
+) {
+    if (!activations || !packed_weights_128) {
+        return 0;
+    }
+    int32_t acc = 0;
+    for (uint32_t byte_idx = 0u; byte_idx < 128u; ++byte_idx) {
+        uint8_t packed = packed_weights_128[byte_idx];
+        for (uint32_t sub = 0u; sub < 4u; ++sub) {
+            uint8_t code = (uint8_t)((packed >> (sub << 1u)) & 0x3u);
+            int8_t trit = (int8_t)veriobjc_cmux(code == 1u, 1, veriobjc_cmux(code == 2u, -1, 0));
+            acc += veriobjc_ternary_select(trit, activations[(byte_idx << 2u) + sub]);
+        }
+    }
+    return vternary_round_shift_right((int64_t)acc, shift);
 }
 
 #ifdef __cplusplus

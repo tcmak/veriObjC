@@ -293,6 +293,33 @@ TEST(VstdWave2And3Group, StreamingAndTernarySubstrateVerification) {
     LONGS_EQUAL(0, vternary_glu_mux_gate(42, 0));
     LONGS_EQUAL(0, vternary_glu_mux_gate(42, -1));
     LONGS_EQUAL(16, vternary_rmsnorm_shift(64, 2u));
+    LONGS_EQUAL(16, vternary_rmsnorm_shift(16, 0u));
+    // Midpoint round-half-up vs floor shift (setun/docs/NUMERICS.md §2.4):
+    //   +6 with shift=2: floor (6 >> 2) == 1, round-half-up ((6 + 2) >> 2) == 2
+    //   -6 with shift=2: floor (-6 >> 2) == -2, round-half-up ((-6 + 2) >> 2) == -1
+    //   -41400 with shift=4 (NUMERICS.md §3): floor == -2588, round-half-up == -2587
+    LONGS_EQUAL(2, vternary_rmsnorm_shift(6, 2u));
+    LONGS_EQUAL(-1, vternary_rmsnorm_shift(-6, 2u));
+    LONGS_EQUAL(-2587, vternary_round_shift_right(-41400, 4u));
+
+    // Pure CPU software fallback veriobjc_ternary_dot_512 with round-half-up shift
+    int8_t act512[512] = {0};
+    uint8_t wgt128[128] = {0};
+    LONGS_EQUAL(0, veriobjc_ternary_dot_512(nullptr, wgt128, 2u));
+    LONGS_EQUAL(0, veriobjc_ternary_dot_512(act512, nullptr, 2u));
+
+    // Midpoint +6 across 512 lanes (lane 0 = +6 * +1, lanes 1..511 = 0), shift = 2 -> 2 (floor would be 1)
+    act512[0] = 6;
+    wgt128[0] = vternary_pack4(VTERNARY_POS_ONE, VTERNARY_ZERO, VTERNARY_ZERO, VTERNARY_ZERO);
+    LONGS_EQUAL(6, veriobjc_ternary_dot_512(act512, wgt128, 0u));
+    LONGS_EQUAL(2, veriobjc_ternary_dot_512(act512, wgt128, 2u));
+    CHECK_TRUE(veriobjc_ternary_dot_512(act512, wgt128, 2u) != (6 >> 2));
+
+    // Midpoint -6 across 512 lanes (lane 0 = +6 * -1 = -6), shift = 2 -> -1 (floor would be -2)
+    wgt128[0] = vternary_pack4(VTERNARY_NEG_ONE, VTERNARY_ZERO, VTERNARY_ZERO, VTERNARY_ZERO);
+    LONGS_EQUAL(-6, veriobjc_ternary_dot_512(act512, wgt128, 0u));
+    LONGS_EQUAL(-1, veriobjc_ternary_dot_512(act512, wgt128, 2u));
+    CHECK_TRUE(veriobjc_ternary_dot_512(act512, wgt128, 2u) != (-6 >> 2));
 
     // Pre-banked KV cache arena with ContextCap = 4
     KVArena4 kv_arena;

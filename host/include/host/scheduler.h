@@ -132,9 +132,7 @@ static inline enum ttape_sched_status ttape_cpu_run_ternary_matmul(
             uint32_t sh = (uint32_t)desc->scale_exp & 31u;
             desc->scaled_out[r] = (int32_t)(acc << sh);
         } else {
-            uint32_t sh = (uint32_t)(-desc->scale_exp) & 31u;
-            int64_t bias = 1LL << (sh - 1u);
-            desc->scaled_out[r] = (int32_t)((acc + bias) >> sh);
+            desc->scaled_out[r] = vternary_round_shift_right(acc, (uint32_t)(-desc->scale_exp));
         }
     }
     return TTAPE_SCHED_OK;
@@ -191,13 +189,7 @@ static inline enum ttape_sched_status ttape_scheduler_run_layer_cpu_fallback(
                 row_scaled_acc += grp_sum * (int64_t)scale_u16;
             }
             acc_out[row] = (int32_t)raw_acc;
-            if (gview.shift == 0u) {
-                scaled_out[row] = (int32_t)row_scaled_acc;
-            } else {
-                uint32_t sh = (uint32_t)gview.shift & 31u;
-                int64_t bias = 1LL << (sh - 1u);
-                scaled_out[row] = (int32_t)((row_scaled_acc + bias) >> sh);
-            }
+            scaled_out[row] = vternary_round_shift_right(row_scaled_acc, gview.shift);
         }
         return TTAPE_SCHED_OK;
     }

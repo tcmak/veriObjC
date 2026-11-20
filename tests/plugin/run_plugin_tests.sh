@@ -61,7 +61,7 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
         fi
     fi
     if [[ "$(basename "$pos_file")" == "test_valid_ternary_dot.m" ]]; then
-        if UNK_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --unsupported-plugin-flag -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1); then
+        if UNK_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --unsupported-plugin-flag -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -fsyntax-only "$pos_file" 2>&1); then
             echo "[FAIL] Expected VeriObjCPlugin to reject unknown plugin argument!"
             exit 1
         fi

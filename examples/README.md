@@ -139,7 +139,7 @@ Compile `ternary_glu_block.m` with `veriobjc-check` to enforce `objc_hw_kernel` 
 clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -Wno-objc-root-class -fblocks \
          -Xclang -load -Xclang build/libVeriObjCPlugin.so \
          -Xclang -add-plugin -Xclang veriobjc-check \
-         -I./rt/include \
+         -I./rt/include -I./vstd/include \
          -c examples/ternary_glu_block.m \
          -o build/ternary_glu_block.o
 ```

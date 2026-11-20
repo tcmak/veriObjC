@@ -271,17 +271,17 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 *(Mapped to: `docs/veriobjc-poc-execution-plan.md` Module 3)*
 
 - [x] **Task 4.1: Cycle-Accurate Microbenchmark Harness**
-  - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0` via `rt_bench_read_cycles` in `<rt/bench_harness.h>`) and deterministic p50/p99/p99.9 + teardown cycle extraction (`rt_bench_compute_stats`) benchmarking unified `vvector<T, N>` containers directly (`tests/unit_rt/TestBenchHarness.cpp`).
-  - *Amendment 4 (2026-11-18):* benchmark reporting adopts the kit's M6 methodology (`rt_bench_validate_m6_record`, `rt_bench_format_m6_line`: fixed non-zero `M×N×K` shapes, cited baselines, $-normalization in cents, `vtpe_profile=core|extended`, and `dsp_mode=zero-dsp|dsp-enabled` named on every number) with 100.00% `llvm-cov` coverage.
+  - CPU cycle measurement (`rdtsc` / `CNTVCT_EL0` via `rt_bench_read_cycles` in `<host/bench_harness.h>`) and deterministic p50/p99/p99.9 + teardown cycle extraction (`rt_bench_compute_stats`) benchmarking unified `vvector<T, N>` containers directly (`tests/unit_rt/TestBenchHarness.cpp`).
+  - *Amendment 4 (2026-11-18 / Task B2):* benchmark reporting adopts the M6 methodology (`rt_bench_validate_m6_record`, `rt_bench_format_m6_line`: fixed non-zero `M×N×K` shapes, cited baselines, $-normalization in cents, `ttape_profile=core|grouped|extended`, and `dsp_mode=zero-dsp|dsp-enabled` named on every number) isolated under `host/include/host/` so `rt/` remains strictly freestanding.
 - [x] **Task 4.2: Survivor Reports as Build Artifacts**
   - `--effects-report`: per-line survivor report of effectful call sites.
   - `--branch-report`: classification of proven, hinted (`__builtin_expect`), and unproven data-dependent branches in `@nolatency` / `@pure` functions (`compiler/src/VeriObjCPlugin.cpp`).
   - `--mono-report`: monomorphization byte budget and instantiation tracking.
-  - Survivor report diff engine (`rt_survivor_diff_audit` in `<rt/survivor_report.h>`, verified in `tests/unit_rt/TestSurvivorReport.cpp` with 100.00% `llvm-cov` coverage) rejecting new `@alloc` effects, surviving effect growth, new unproven branches, monomorphization regressions, and non-zero DSP blocks.
+  - Survivor report diff engine (`rt_survivor_diff_audit` in `<host/survivor_report.h>`, verified in `tests/unit_rt/TestSurvivorReport.cpp` with 100.00% `llvm-cov` coverage) rejecting new `@alloc` effects, surviving effect growth, new unproven branches, monomorphization regressions, and non-zero DSP blocks.
 - [x] **Task 4.3: Latency Budget Gates**
-  - CI budget check (`rt_latency_gate_check` in `<rt/latency_gate.h>`, verified in `tests/unit_rt/TestLatencyBudgetGate.cpp` with 100.00% `llvm-cov` coverage): p50/p99/p99.9/teardown regression beyond `noise_band_cycles` fails closed naming the offending benchmark (`bench=<id>`) and commit (`commit=<sha>`).
+  - CI budget check (`rt_latency_gate_check` in `<host/latency_gate.h>`, verified in `tests/unit_rt/TestLatencyBudgetGate.cpp` with 100.00% `llvm-cov` coverage): p50/p99/p99.9/teardown regression beyond `noise_band_cycles` fails closed naming the offending benchmark (`bench=<id>`) and commit (`commit=<sha>`).
 - [ ] **Task 4.4: Formal Math Proof Integration (SMACK / Z3)** *(scaffolding only — external SMT solver not yet wired)*
-  - Current scaffolding: `@pre` and `@post` boundary extraction (`--smt-report` in `compiler/src/VeriObjCPlugin.cpp` emitting `(assert (<pre>))` / `(assert (not (<post>)))` with `Solver: UNIMPLEMENTED_STUB (no external SMT solver invoked)`) and affine interval endpoint stub `rt_contract_eval_endpoints_stub` (`RT_CONTRACT_ENDPOINT_CHECK_PASSED`) in `<rt/smt_bridge.h>`, verified in `tests/unit_rt/TestSmtContractBridge.cpp` with 100.00% `llvm-cov` coverage. Real SMACK/Z3 solver discharge remains unimplemented.
+  - Current scaffolding: `@pre` and `@post` boundary extraction (`--smt-report` in `compiler/src/VeriObjCPlugin.cpp` emitting `(assert (<pre>))` / `(assert (not (<post>)))` with `Solver: UNIMPLEMENTED_STUB (no external SMT solver invoked)`) and affine interval endpoint stub `rt_contract_eval_endpoints_stub` (`RT_CONTRACT_ENDPOINT_CHECK_PASSED`) in `<host/smt_bridge.h>`, verified in `tests/unit_rt/TestSmtContractBridge.cpp` with 100.00% `llvm-cov` coverage. Real SMACK/Z3 solver discharge remains unimplemented.
 
 ---
 
@@ -296,8 +296,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 5.3: Ternary Block Elaboration & Direct-Body Zero-Multiplication Gate** *(direct-body `*` check only; transitive helper check open)*
   - Compile `examples/ternary_glu_block.m` with `veriobjc-check`; assert the plugin's `objc_hw_kernel` AST check rejects direct `*`/`*=` operators, `ternary_dot<512>` verifies `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) declares `@latency(cycles = 10)` *(transitive helper call-graph `*`/`/` checking is not yet enforced)*.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
-- [ ] **Task 5.4: Vendor Synthesis Validation & RTL Equivalence** *(out of `veriObjC` scope — hardware synthesis & RTL resource reporting belong outside `veriObjC`)*
-  - *Scope note: RTL synthesis, LUT/FF/BRAM/DSP resource reporting, timing closure, and RTL co-simulation are owned by the hardware repository, never estimated or stood in for inside `veriObjC`.*
+- ~~**Task 5.4: Vendor Synthesis Validation & RTL Equivalence (DROPPED from `veriObjC` in Task B2)**~~
+  - *Boundary cut (Task B2): Duplicate C/RTL co-simulation interpreters and hardware synthesis reporting are permanently dropped from `veriObjC`. Hardware RTL, generated CSR maps, and Yosys/`nextpnr` synthesis belong to `setun`, and **`setun/ref/` is the sole numerical/co-simulation oracle** across the portfolio. `<vstd/ternary.h>` retains `veriobjc_ternary_dot_512` strictly as a pure-CPU round-half-up software fallback.*
 - [ ] **Task 5.5: Mixed-Size Sealed Hierarchy Composition Test (Upcast Dispatch + Scope Reset)**
   - *The seam found in external review: every ingredient is tested separately (sealed dispatch, one-store reset, root safety), but never the composition. A claim that isn't tested isn't a claim.*
   - Scenario: multiple concrete subclasses of one sealed hierarchy, **with differing ivar counts and sizes**, allocated within a single `@scoped` block on one data stack and referenced through **superclass-typed pointers**.
@@ -307,27 +307,17 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
     - One-store reset under heterogeneity: scope exit restores the stack top to the scope mark in **exactly one `movq`** despite mixed concrete sizes (`llvm-objdump` audit).
     - No escape: storing any upcast (superclass-typed) reference into an outer-scope destination fails with the reference-root diagnostic; all upcast references are dead at scope exit.
     - 100% region/function/branch coverage on the new paths (`llvm-cov`).
-- [x] **Task 5.6a: VTPE v1 Format Freeze & Golden Tape Corpus (do first — portfolio-critical)**
-  - *Amendment 1 (2026-11-18): 5.6 is split so the parts every other repo needs land first, without waiting for full `rt/` reconciliation.*
-  - Freeze the two-profile VTPE v1 contract as implemented by consumers (`docs/veriobjc-ternary-tape-format-specification-v1-proposal.md` + `vtpe_v1_validate_tape` in `rt/include/veriobjc_runtime.h`): 32-byte `"VTPE"` header, FNV-1a-32 framing over all 28 non-checksum header bytes, 64-bit FNV-1a `artifact_id` over framed sections, flags bits (bit 2 = profile `0=Core, 1=Extended`; bits 3–7 reserved and rejected with `VTPE_ERR_UNKNOWN_FLAGS` — kit ADR-0002), Extended-only host-consumed `0x0006` (`fp32_aux`) section, ternary section packing, and the §8 rejection contract.
-  - Published **12 golden VTPE tapes** (`3 accept` + `9 reject`, each `.bin` paired with a `.json` expectation sidecar) under `fixtures/vtpe_v1/{accept,reject}/`, verified by `tests/unit_rt/TestVtpeV1GoldenCorpus.cpp` with exhaustive per-byte mutation sweeps and 100.00% `llvm-cov` coverage.
-  - **Priority:** 5.6a outranks Task 3.3c — 3.3c gates Phase 4 benchmarks, but 5.6a gates every cross-repo artifact (Task 5.7 runtime slice, Task 5.8 conformance suite, kit M4.5 INT8 tape oracle, setun loader migration, TernaryTape.jl unblock).
-- [x] **Task 5.6b: Tape Format Specification v1 — Full `rt/` Reconciliation & Publication**
-  - Full original Task 5.6 scope: extracted the `veriobjc_to_bytes` / `veriobjc_from_bytes` / `veriobjc_verify_rel32_link` / `veriobjc_tape_validate_v1` framing, checksum, and self-relative link rules alongside the `VTPE` v1.0 multi-section ternary tape rules into a versioned, byte-exact spec (`docs/veriobjc-tape-format.md`) regenerated from `rt/` (`rt/include/veriobjc_runtime.h`).
-  - Golden vector corpus: committed 8 `VOBJ` v1 fixtures (`2 accept` + `6 reject`, each `.bin` paired with `.json` expectations) under `fixtures/vobj_v1/{accept,reject}/` plus per-byte mutation expectations verifying that every byte index `0 .. len - 1` in both reference tapes flips accept → reject (`TestTapeAndRelPtr.cpp`).
-  - Dual-direction corpus gate for external tapes: committed fixtures produced by an external encoder load clean and are rejected under mutation (`ExternalVobjV1GoldenCorpusAndDualDirectionMutationGate` in `tests/unit_rt/TestTapeAndRelPtr.cpp`), running the freestanding C loader only with 100.00% `llvm-cov` coverage.
-  - *No longer blocks the other repos: TernaryTape.jl and the portfolio conformance work unblock on 5.6a; 5.6b is the final contract publication.*
-
-- [x] **Task 5.7: veriStream Runtime Slice (`rt/vtpe_reader`, `rt/dispatch`, `rt/scheduler`)** *(Amendment 2 — rephaseable any time after 5.6a)*
-  - `rt/vtpe_reader` (`rt/include/rt/vtpe_reader.h`): zero-copy tape parser implementing the §8 rejection contract via `vtpe_v1_validate_tape`, validated against the 5.6a golden tapes (`tests/unit_rt/TestVeriStreamRuntimeSlice.cpp`).
-  - `rt/dispatch` (`rt/include/rt/dispatch.h`): backend dispatch abstraction with two initial backends — the setun accelerator (LiteX CSR/DMA via `AccelDriver`, Season 2–3: `VTPE_BACKEND_SETUN_LITEX`) and the kit's HLS tile (`VTPE_BACKEND_KIT_HLS_TILE`).
-  - `rt/scheduler` (`rt/include/rt/scheduler.h`): maps a tape's layers onto `KERNEL_SPEC` kernel invocations (tiling, buffer descriptors, invocation order, and `is_hardware_visible` provenance).
-  - Host-side `fp32_aux` handling: embeddings/RMSNorm/softmax remain strictly host-consumed and never hardware-visible; attempting to bind any `fp32_aux` byte range to a hardware buffer descriptor fails closed with `VTPE_DISPATCH_ERR_HOST_ONLY_AUX_FORBIDDEN` (enforcing the kit data-flow rule).
-  - **Acceptance:** `"parse one Core-profile tape, run one matmul on the setun accelerator, return C, bit-exact vs golden"` verified in `TestVeriStreamRuntimeSlice.cpp` (plus bit-exact cross-backend check against `VTPE_BACKEND_KIT_HLS_TILE`) with 100.00% `llvm-cov` coverage.
-
-- [x] **Task 5.8: Portfolio Golden-Tape Conformance Suite** *(Amendment 3 — VeriObjC owns it as format owner)*
-  - The 5.6a golden tapes (`12` tapes: `3 accept` + `9 reject`) + unified portfolio conformance runner (`rt/include/rt/portfolio_conformance.h`, `tests/unit_rt/TestPortfolioConformanceSuite.cpp`, and `tests/integration/run_portfolio_conformance_suite.sh`, CTest target `portfolio_conformance_tests`) exercised against all three portfolio consumers: `setun` (`VTPE_CONSUMER_SETUN_RTL_SIM`), `veriobjc-inference-appliance-kit` M4.5 INT8 tape oracle (`VTPE_CONSUMER_KIT_M45_INT8_ORACLE`, Core-only ADR-0002 profile gate), and `TernaryTape.jl`'s reference interpreter (`VTPE_CONSUMER_TERNARY_TAPE_JL`).
-  - **Acceptance:** one command (`tests/integration/run_portfolio_conformance_suite.sh`) reproduces all three consumption checks and verifies bit-exact oracle outputs; negative self-tests verify that failures explicitly name the failing repo (`repo=<name>`) and the exact violated specification clause (`clause=§...`), with 100.00% `llvm-cov` coverage.
+- [x] **Task 5.6a: Canonical `TTAPE` v1 Consumption & Golden Tape Corpus (`Task B2`)**
+  - Replaced local `VTPE` spec prose and duplicated fixtures with the canonical **`TernaryTape.jl`** submodule at `third_party/TernaryTape` (`spec-v0.1-draft`, `magic = "TTAP"`, `0x50415454` LE).
+  - Implemented `<vstd/ttape_reader.h>` supporting all three profiles (`TTAPE_PROFILE_CORE`, `TTAPE_PROFILE_GROUPED` with `0x0006` `group_scales_u16`, and `TTAPE_PROFILE_EXTENDED` with `0x0007` `fp32_aux`), verified against all 20 golden fixture pairs (`4 accept` + `16 reject`) and exhaustive per-byte single-bit mutation sweeps in `tests/unit_rt/TestTtapeGoldenCorpus.cpp`.
+- [x] **Task 5.6b: `VOBJ` v1 Single-Table Snapshot Persistence (`rt/`)**
+  - Freestanding `veriobjc_to_bytes` / `veriobjc_from_bytes` / `veriobjc_verify_rel32_link` / `veriobjc_tape_validate_v1` framing, FNV-1a-32 checksum, and self-relative `RelPtr` link rules in `rt/include/veriobjc_runtime.h`.
+  - Golden vector corpus: committed 8 `VOBJ` v1 fixtures (`2 accept` + `6 reject`) under `fixtures/vobj_v1/{accept,reject}/` plus exhaustive per-byte mutation verification in `tests/unit_rt/TestTapeAndRelPtr.cpp`.
+- [x] **Task 5.7: Host-Side `TTAPE` Planner & Pure-CPU Round-Half-Up Fallback (`<vstd/ttape_reader.h>`, `<vstd/ternary.h>`, `<host/scheduler.h>`)**
+  - Isolated host-only scheduling (`<host/scheduler.h>`) and `fp32_aux` inspection out of freestanding `rt/` (`rt/` compiles cleanly with `-ffreestanding -mno-sse` and zero `float`/`double` types).
+  - Removed invented hardware register structs (`vtpe_setun_csr_regs`) and floor-shifting mock simulators; aligned `veriobjc_ternary_dot_512` and `<vstd/ternary.h>` to pure-CPU **round-half-up** (`(acc + (1 << (shift - 1))) >> shift` for `shift > 0`) matching `setun/docs/NUMERICS.md` (`tests/unit_rt/TestVeriStreamRuntimeSlice.cpp` & `tests/unit_rt/TestVstdWave2And3.cpp`).
+- ~~**Task 5.8: Stand-In Cross-Repo Conformance Runner (REMOVED in Task B2)**~~
+  - *Deleted local stand-in certification (`portfolio_conformance.h`). Each repository (`TernaryTape.jl`, `setun`, `veriObjC`) now validates directly against the shared `third_party/TernaryTape/fixtures/` golden corpus in its own CI.*
 
 ---
 

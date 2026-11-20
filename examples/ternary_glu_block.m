@@ -1,4 +1,5 @@
 #include "veriobjc_runtime.h"
+#include "vstd/ternary.h"
 
 #define TERNARY_WEIGHT_TAG 0x5457u // "TW"
 
@@ -53,9 +54,9 @@ __attribute__((objc_final))
     // Token shift via register-delayed stream selection
     const int8_t *shifted_lanes = (use_prev_token != 0u) ? prev_x->lanes : x->lanes;
 
-    // 512-wide CMUX + popcount adder-tree dot products (0 multipliers, 0 DSPs)
-    int32_t g = veriobjc_ternary_dot_512(shifted_lanes, w_gate->lanes);
-    int32_t u = veriobjc_ternary_dot_512(x->lanes, w_up->lanes);
+    // 512-wide pure CPU software fallback ternary dot products (round-half-up shift=0)
+    int32_t g = veriobjc_ternary_dot_512(shifted_lanes, w_gate->lanes, 0u);
+    int32_t u = veriobjc_ternary_dot_512(x->lanes, w_up->lanes, 0u);
 
     // Sign-mux GLU gate (0 DSPs)
     return veriobjc_glu_gate(g, u);
