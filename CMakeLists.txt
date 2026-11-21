@@ -51,6 +51,52 @@ find_library(CPPUTEST_EXT_LIB
         lib
 )
 
+# Discover Z3 SMT solver (>= 4.8.12 required unless -DVERIOBJC_REQUIRE_Z3=OFF)
+option(VERIOBJC_REQUIRE_Z3 "Require Z3 >= 4.8.12 at configure time for SMT contract verification" ON)
+find_program(Z3_EXECUTABLE NAMES z3 DOC "Path to Z3 SMT solver executable (>= 4.8.12)")
+
+set(VERIOBJC_DEFAULT_Z3_PATH "z3")
+if(Z3_EXECUTABLE AND EXISTS "${Z3_EXECUTABLE}")
+    execute_process(
+        COMMAND "${Z3_EXECUTABLE}" --version
+        OUTPUT_VARIABLE _Z3_VERSION_OUT
+        ERROR_VARIABLE _Z3_VERSION_ERR
+        RESULT_VARIABLE _Z3_VERSION_RC
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" Z3_VERSION_STRING "${_Z3_VERSION_OUT}")
+    if(NOT _Z3_VERSION_RC EQUAL 0 OR NOT Z3_VERSION_STRING)
+        if(VERIOBJC_REQUIRE_Z3)
+            message(FATAL_ERROR
+                "Failed to query Z3 version from Z3_EXECUTABLE='${Z3_EXECUTABLE}' "
+                "(output: '${_Z3_VERSION_OUT} ${_Z3_VERSION_ERR}'). "
+                "Install Z3 >= 4.8.12 ('sudo apt-get install z3' or 'bash scripts/install.sh'), "
+                "pass -DZ3_EXECUTABLE=/path/to/z3, or disable enforcement with -DVERIOBJC_REQUIRE_Z3=OFF."
+            )
+        endif()
+    elseif(Z3_VERSION_STRING VERSION_LESS "4.8.12")
+        if(VERIOBJC_REQUIRE_Z3)
+            message(FATAL_ERROR
+                "Found Z3 ${Z3_VERSION_STRING} at '${Z3_EXECUTABLE}', but VeriObjC requires Z3 >= 4.8.12 (64-bit). "
+                "Upgrade Z3 ('sudo apt-get install z3'), pass -DZ3_EXECUTABLE=/path/to/z3, "
+                "or disable enforcement with -DVERIOBJC_REQUIRE_Z3=OFF."
+            )
+        endif()
+    else()
+        message(STATUS "Found Z3 ${Z3_VERSION_STRING} via ${Z3_EXECUTABLE}")
+        set(VERIOBJC_DEFAULT_Z3_PATH "${Z3_EXECUTABLE}")
+    endif()
+elseif(VERIOBJC_REQUIRE_Z3)
+    message(FATAL_ERROR
+        "Z3 SMT solver not found (Z3_EXECUTABLE='${Z3_EXECUTABLE}'). "
+        "VeriObjC requires Z3 >= 4.8.12 (64-bit) for Task 4.4 contract verification. "
+        "Install via 'sudo apt-get install z3' (or 'bash scripts/install.sh'), "
+        "pass -DZ3_EXECUTABLE=/path/to/z3, or disable enforcement with -DVERIOBJC_REQUIRE_Z3=OFF."
+    )
+else()
+    message(STATUS "Z3 not found (VERIOBJC_REQUIRE_Z3=OFF); using fallback VERIOBJC_DEFAULT_Z3_PATH='z3'")
+endif()
+
 # Per-component INTERFACE targets enforcing the Phase 3 Layer Table:
 #   rt   -> (nothing)
 #   vstd -> rt, vstd
@@ -115,6 +161,7 @@ if(BUILD_TESTING)
 
     target_compile_definitions(unit_rt_tests PRIVATE
         VERIOBJC_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+        VERIOBJC_DEFAULT_Z3_PATH="${VERIOBJC_DEFAULT_Z3_PATH}"
     )
 
     # Compile all vstd unit tests as Objective-C++ so the #ifdef __OBJC__ halves of
@@ -201,6 +248,7 @@ target_include_directories(VeriObjCPlugin SYSTEM PRIVATE
 
 target_compile_definitions(VeriObjCPlugin PRIVATE
     ${LLVM_DEFINITIONS_LIST}
+    VERIOBJC_DEFAULT_Z3_PATH="${VERIOBJC_DEFAULT_Z3_PATH}"
 )
 
 target_compile_options(VeriObjCPlugin PRIVATE

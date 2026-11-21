@@ -103,5 +103,24 @@ for standalone_ex in "sealed_synth_hierarchy.m" "sealed_mixed_scope.m"; do
     echo "[PASS] $standalone_ex linked without -lobjc and executed end-to-end cleanly."
 done
 
+# 4. Verify real Z3 SMT contract proof on examples/vcontracts_bounds_proof.m
+echo "[RUN] Z3 SMT Contract Proof Example: vcontracts_bounds_proof.m"
+Z3_EX_OUT=$(clang-23 -std=gnu23 -O2 -Werror -fblocks \
+                     -Xclang -load -Xclang "$PLUGIN_PATH" \
+                     -Xclang -add-plugin -Xclang veriobjc-check \
+                     -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+                     -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report \
+                     -I"$REPO_ROOT/rt/include" \
+                     -I"$REPO_ROOT/vstd/include" \
+                     -fsyntax-only "$REPO_ROOT/examples/vcontracts_bounds_proof.m" 2>&1)
+for proven_fn in "clamp_limit_price" "round_up_dma_frame_64"; do
+    if ! echo "$Z3_EX_OUT" | grep -q "Function: $proven_fn | .*Solver: Z3 version .* | Status: UNSAT_PROVEN"; then
+        echo "[FAIL] Expected Z3 to prove $proven_fn UNSAT_PROVEN in vcontracts_bounds_proof.m!"
+        echo "$Z3_EX_OUT"
+        exit 1
+    fi
+done
+echo "[PASS] vcontracts_bounds_proof.m verified UNSAT_PROVEN by real Z3."
+
 echo "=== All Examples Smoke & Acceptance Tests Passed! ==="
 exit 0

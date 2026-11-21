@@ -92,6 +92,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_sealed_upcast_escape.m)
             EXPECTED_DIAG="Escaping data-stack reference"
             ;;
+        valid_objc_contract_counterexample.m)
+            EXPECTED_DIAG="Z3_SAT_COUNTEREXAMPLE"
+            ;;
         valid_objc_unchecked_vresult.m)
             EXPECTED_DIAG="Unchecked vresult access"
             ;;
@@ -137,10 +140,16 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
             ;;
     esac
 
+    EXTRA_CORPUS_ARGS=()
+    if [[ "$base_name" == "valid_objc_contract_counterexample.m" ]]; then
+        EXTRA_CORPUS_ARGS=(-Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify)
+    fi
+
     # Direction 2: Must fail under VeriObjC plugin with the exact named diagnostic
     if PLUGIN_OUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions \
                              -Xclang -load -Xclang "$PLUGIN_PATH" \
                              -Xclang -add-plugin -Xclang veriobjc-check \
+                             "${EXTRA_CORPUS_ARGS[@]}" \
                              -I"$REPO_ROOT/rt/include" \
                              -I"$REPO_ROOT/vstd/include" \
                              -I"$REPO_ROOT/sys0/include" \

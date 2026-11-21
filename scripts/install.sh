@@ -22,9 +22,9 @@ command -v sudo >/dev/null 2>&1 && SUDO="sudo"
 [ "$(uname -s)" = "Linux" ] || die "This bootstrap targets Linux (the reference toolchain path)."
 command -v apt-get >/dev/null 2>&1 || die "apt-get not found — see INSTALL.md 'Manual steps' for other distributions."
 
-say "Installing build prerequisites (cmake, make, git, wget)…"
+say "Installing build prerequisites (cmake, make, git, wget, z3)…"
 $SUDO apt-get update -qq
-$SUDO apt-get install -y build-essential cmake git wget
+$SUDO apt-get install -y build-essential cmake git wget z3
 
 if ! command -v "clang-$LLVM_VERSION" >/dev/null 2>&1; then
   say "Installing Clang/LLVM $LLVM_VERSION from apt.llvm.org…"
@@ -55,6 +55,14 @@ say "Verifying toolchain…"
 "clang-$LLVM_VERSION"  --version | head -n1
 "clang++-$LLVM_VERSION" --version | head -n1
 cmake --version | head -n1
+command -v z3 >/dev/null 2>&1 || die "z3 not found on PATH after installation (requires Z3 >= 4.8.12)."
+Z3_VER_LINE="$(z3 --version | head -n1)"
+printf '%s\n' "$Z3_VER_LINE"
+Z3_VER_NUM="$(printf '%s\n' "$Z3_VER_LINE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+[ -n "$Z3_VER_NUM" ] || die "Could not parse version from '$Z3_VER_LINE' (requires Z3 >= 4.8.12)."
+if ! dpkg --compare-versions "$Z3_VER_NUM" ge "4.8.12"; then
+  die "Installed Z3 version $Z3_VER_NUM is older than required minimum 4.8.12."
+fi
 if [ "$SKIP_CPPUTEST" -eq 0 ]; then
   CPPUTEST_LIB="$(find "$DEPS_DIR/cpputest/cpputest_build" -name 'libCppUTest.a' | head -n1)"
   [ -n "$CPPUTEST_LIB" ] || die "CppUTest static library not found — build failed silently, re-run with verbose output."

@@ -23,14 +23,15 @@ jobs:
           path: ${{ runner.temp }}/veriobjc-deps/cpputest
           key: ${{ runner.os }}-cpputest-master-v1
 
-      - name: Install LLVM 23 and CppUTest via bootstrap script
+      - name: Install LLVM 23, Z3, and CppUTest via bootstrap script
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y lsb-release wget software-properties-common gnupg
+          sudo apt-get install -y lsb-release wget software-properties-common gnupg z3
           bash scripts/install.sh
 
       - name: Configure and build with CMake
         run: |
+          z3 --version
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="clang-${LLVM_VERSION}" \

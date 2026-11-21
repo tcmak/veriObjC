@@ -110,14 +110,71 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
         SMT_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
-        if ! echo "$SMT_OUT" | grep -q "\[VeriObjC --smt-report\] Function: export_ingest_wire_order | Pre: (assert (hdr.msg_len <= 1400)) | Post: (assert (not (return.generation != 0))) | Solver: UNIMPLEMENTED_STUB"; then
-            echo "[FAIL] Expected --smt-report to emit honest UNIMPLEMENTED_STUB solver status for export_ingest_wire_order!"
+        if ! echo "$SMT_OUT" | grep -q "\[VeriObjC --smt-report\] Function: export_ingest_wire_order | Pre: (assert (hdr.msg_len <= 1400)) | Post: (assert (not (return.generation != 0))) | Solver: Z3 version .* | Status: SAT_COUNTEREXAMPLE"; then
+            echo "[FAIL] Expected --smt-report to invoke real Z3 and report Status: SAT_COUNTEREXAMPLE on unconstrained session_h.generation in export_ingest_wire_order!"
             echo "$SMT_OUT"
             exit 1
         fi
-        if echo "$SMT_OUT" | grep -q "(check-sat)"; then
-            echo "[FAIL] Expected --smt-report to omit fake (check-sat) output when no solver is invoked!"
-            echo "$SMT_OUT"
+    fi
+    if [[ "$(basename "$pos_file")" == "test_valid_smt_z3_proof.m" ]]; then
+        Z3_PROVE_OUT=$(clang-23 -std=gnu23 -fblocks \
+                                -Xclang -load -Xclang "$PLUGIN_PATH" \
+                                -Xclang -add-plugin -Xclang veriobjc-check \
+                                -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+                                -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report \
+                                -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" \
+                                -fsyntax-only "$pos_file" 2>&1)
+        for fn_name in "scale_order_lot_fee" "clamp_fee_bps" "align_dma_len_64"; do
+            if ! echo "$Z3_PROVE_OUT" | grep -q "Function: $fn_name | .*Solver: Z3 version .* | Status: UNSAT_PROVEN"; then
+                echo "[FAIL] Expected Z3 --smt-verify/--smt-report to prove $fn_name UNSAT_PROVEN!"
+                echo "$Z3_PROVE_OUT"
+                exit 1
+            fi
+        done
+
+        # Missing / invalid --z3-path must fail closed with Z3_SOLVER_UNAVAILABLE
+        if BAD_Z3_OUT=$(clang-23 -std=gnu23 -fblocks \
+                                 -Xclang -load -Xclang "$PLUGIN_PATH" \
+                                 -Xclang -add-plugin -Xclang veriobjc-check \
+                                 -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+                                 -Xclang -plugin-arg-veriobjc-check -Xclang --z3-path=/nonexistent/veriobjc/z3 \
+                                 -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" \
+                                 -fsyntax-only "$pos_file" 2>&1); then
+            echo "[FAIL] Expected bad --z3-path to fail closed!"
+            exit 1
+        fi
+        if ! echo "$BAD_Z3_OUT" | grep -q "Z3_SOLVER_UNAVAILABLE" || ! echo "$BAD_Z3_OUT" | grep -q "/nonexistent/veriobjc/z3"; then
+            echo "[FAIL] Expected Z3_SOLVER_UNAVAILABLE diagnostic naming bad --z3-path!"
+            echo "$BAD_Z3_OUT"
+            exit 1
+        fi
+
+        # Exceeded timeout (--smt-timeout-ms=15 on hard 64-bit BV factorization) must fail closed with Z3_UNKNOWN_TIMEOUT
+        TMP_TIMEOUT_M=$(mktemp /tmp/veriobjc_z3_timeout_XXXXXX.m)
+        cat > "$TMP_TIMEOUT_M" << 'EOF'
+#include "veriobjc_runtime.h"
+#include "vstd/contracts.h"
+vcontract_pre("a > 1 && b > 1 && (a & 1) == 1")
+vcontract_post("result != 81985529216486895")
+veriobjc_export veriobjc_pure uint64_t hard_factor_gate(uint64_t a, uint64_t b) {
+    return a * b;
+}
+EOF
+        if TIMEOUT_OUT=$(clang-23 -std=gnu23 -fblocks \
+                                  -Xclang -load -Xclang "$PLUGIN_PATH" \
+                                  -Xclang -add-plugin -Xclang veriobjc-check \
+                                  -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+                                  -Xclang -plugin-arg-veriobjc-check -Xclang --smt-timeout-ms=15 \
+                                  -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" \
+                                  -fsyntax-only "$TMP_TIMEOUT_M" 2>&1); then
+            rm -f "$TMP_TIMEOUT_M"
+            echo "[FAIL] Expected --smt-timeout-ms=15 on hard_factor_gate to fail closed!"
+            exit 1
+        fi
+        rm -f "$TMP_TIMEOUT_M"
+        if ! echo "$TIMEOUT_OUT" | grep -q "Z3_UNKNOWN_TIMEOUT"; then
+            echo "[FAIL] Expected Z3_UNKNOWN_TIMEOUT diagnostic when solver timeout is exceeded!"
+            echo "$TIMEOUT_OUT"
             exit 1
         fi
     fi
@@ -262,11 +319,19 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Banned polling ring in vasync pipeline"
     elif [[ "$base_name" == test_banned_raw_simd_intrinsic* ]]; then
         EXPECTED_MSG="Raw SIMD intrinsic in @nolatency code is banned"
+    elif [[ "$base_name" == test_banned_smt_z3_counterexample* ]]; then
+        EXPECTED_MSG="Z3_SAT_COUNTEREXAMPLE"
+    fi
+
+    EXTRA_PLUGIN_ARGS=()
+    if [[ "$base_name" == test_banned_smt_z3_counterexample* ]]; then
+        EXTRA_PLUGIN_ARGS=(-Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify)
     fi
 
     OUTPUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions \
                       -Xclang -load -Xclang "$PLUGIN_PATH" \
                       -Xclang -add-plugin -Xclang veriobjc-check \
+                      "${EXTRA_PLUGIN_ARGS[@]}" \
                       -I"$REPO_ROOT/rt/include" \
                       -I"$REPO_ROOT/vstd/include" \
                       -I"$REPO_ROOT/sys0/include" \
@@ -275,6 +340,15 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
                       -o /dev/null 2>&1 || true)
 
     if echo "$OUTPUT" | grep -q "$EXPECTED_MSG"; then
+        if [[ "$base_name" == test_banned_smt_z3_counterexample* ]]; then
+            for req_tok in "unchecked_add_margin_i32" "10:40" "@post(result > price)" "price =" "margin =" "result ="; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing Goose-style witness/location token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
         echo "[PASS] Successfully caught violation in $base_name"
     else
         echo "[FAIL] Negative Test did NOT produce expected error diagnostic in $base_name!"
