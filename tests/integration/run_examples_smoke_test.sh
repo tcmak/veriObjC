@@ -81,24 +81,27 @@ for c_file in "$REPO_ROOT"/examples/*.c; do
     echo "[PASS] $base_name compiled cleanly in freestanding mode (0 undefined external symbols)."
 done
 
-# 3. Link & run standalone sealed_synth_hierarchy.m end-to-end WITHOUT -lobjc
-echo "[RUN] Standalone Executable Example: sealed_synth_hierarchy.m"
-clang-23 -std=gnu23 -O2 -Werror -fblocks \
-         -Xclang -load -Xclang "$PLUGIN_PATH" \
-         -Xclang -add-plugin -Xclang veriobjc-check \
-         -fpass-plugin="$PLUGIN_PATH" \
-         -I"$REPO_ROOT/rt/include" \
-         "$REPO_ROOT/examples/sealed_synth_hierarchy.m" \
-         -o "$TMP_SEALED_BIN"
+# 3. Link & run standalone @sealed executables end-to-end WITHOUT -lobjc
+for standalone_ex in "sealed_synth_hierarchy.m" "sealed_mixed_scope.m"; do
+    echo "[RUN] Standalone Executable Example: $standalone_ex"
+    clang-23 -std=gnu23 -O2 -Werror -fblocks \
+             -Xclang -load -Xclang "$PLUGIN_PATH" \
+             -Xclang -add-plugin -Xclang veriobjc-check \
+             -fpass-plugin="$PLUGIN_PATH" \
+             -I"$REPO_ROOT/rt/include" \
+             -I"$REPO_ROOT/vstd/include" \
+             "$REPO_ROOT/examples/$standalone_ex" \
+             -o "$TMP_SEALED_BIN"
 
-if nm "$TMP_SEALED_BIN" | grep -qE "objc_msgSend|objc_msg_lookup|__objc_exec_class|_OBJC_CLASS_|_OBJC_METACLASS_|[[:space:]]U[[:space:]]+malloc|[[:space:]]U[[:space:]]+free"; then
-    echo "[FAIL] sealed_synth_hierarchy linked binary contains forbidden ObjC runtime or heap symbols!"
-    nm "$TMP_SEALED_BIN"
-    exit 1
-fi
+    if nm "$TMP_SEALED_BIN" | grep -qE "objc_msgSend|objc_msg_lookup|__objc_exec_class|_OBJC_CLASS_|_OBJC_METACLASS_|[[:space:]]U[[:space:]]+malloc|[[:space:]]U[[:space:]]+free"; then
+        echo "[FAIL] $standalone_ex linked binary contains forbidden ObjC runtime or heap symbols!"
+        nm "$TMP_SEALED_BIN"
+        exit 1
+    fi
 
-"$TMP_SEALED_BIN"
-echo "[PASS] sealed_synth_hierarchy.m linked without -lobjc and executed end-to-end cleanly."
+    "$TMP_SEALED_BIN"
+    echo "[PASS] $standalone_ex linked without -lobjc and executed end-to-end cleanly."
+done
 
 echo "=== All Examples Smoke & Acceptance Tests Passed! ==="
 exit 0

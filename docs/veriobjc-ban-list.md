@@ -34,7 +34,7 @@ Two artifacts, both CI gates:
 
 | Banned construct | Valid ObjC/C? | Diagnostic (key phrase) | VeriObjC replacement | Test |
 | :--- | :--- | :--- | :--- | :--- |
-| Escaping data-stack reference (outer vars, globals, struct fields, `*out_param`, `&inner[0]`, helper passthrough) | Yes (raw pointers) | "Escaping data-stack reference" | Pool handles; `vweak` | `test_banned_escaping_stack_ref.m`, `test_banned_escape_*.m`, `valid_objc_escape_via_out_param.m` ✓ |
+| Escaping data-stack reference (outer vars, globals, struct fields, `*out_param`, `&inner[0]`, `vspan_init`, helper passthrough) | Yes (raw pointers) | "Escaping data-stack reference" | Pool handles; `vweak` | `test_banned_escaping_stack_ref.m`, `test_banned_escape_*.m`, `valid_objc_escape_via_out_param.m`, `valid_objc_sealed_upcast_escape.m` ✓ |
 | Escaping function block | Yes | "Banned escaping function block" | Non-escaping blocks only | `test_banned_escaping_block.m` ✓ |
 | Non-flat channel payload | Yes | "Banned non-flat channel payload" | Flat values; crossing = `memcpy` | `test_banned_nonflat_channel.m` ✓ |
 | General heap on constrained paths | Yes (`malloc`) | "`@alloc` not permitted in `@nolatency` context" | Data stacks / `vpool` | `test_banned_heap_nolatency.m` ✓ |

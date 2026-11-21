@@ -125,10 +125,16 @@ SinkBaseInfo inspectAssignmentLHS(const Expr *LHS) {
             if (Info.FieldName.empty()) {
                 Info.FieldName = ME->getMemberDecl()->getNameAsString();
             }
+            const Expr *NextBase = ME->getBase()->IgnoreParenCasts();
             if (ME->isArrow()) {
+                if (const auto *AddrUO = dyn_cast<UnaryOperator>(NextBase);
+                    AddrUO && AddrUO->getOpcode() == UO_AddrOf) {
+                    Cur = AddrUO->getSubExpr()->IgnoreParenCasts();
+                    continue;
+                }
                 Info.DereferencedPointer = true;
             }
-            Cur = ME->getBase()->IgnoreParenCasts();
+            Cur = NextBase;
             continue;
         }
         if (const auto *UO = dyn_cast<UnaryOperator>(Cur); UO && UO->getOpcode() == UO_Deref) {
@@ -277,6 +283,10 @@ llvm::SmallVector<unsigned, 4> VeriObjCVisitor::getForwardedParamIndices(
             for (const Expr *InitE : ILE->inits()) {
                 self(self, InitE, Out);
             }
+            return;
+        }
+        if (const auto *CLE = dyn_cast<CompoundLiteralExpr>(E)) {
+            self(self, CLE->getInitializer(), Out);
             return;
         }
         if (const auto *CE = dyn_cast<CallExpr>(E)) {
@@ -485,6 +495,13 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         }
 
         if (const auto *ME = dyn_cast<MemberExpr>(Stripped)) {
+            if (ME->isArrow()) {
+                const Expr *ArrowBase = ME->getBase()->IgnoreParenCasts();
+                if (const auto *AddrUO = dyn_cast<UnaryOperator>(ArrowBase);
+                    AddrUO && AddrUO->getOpcode() == UO_AddrOf) {
+                    return self(self, AddrUO->getSubExpr(), HintRoot, CurDepth, St);
+                }
+            }
             return self(self, ME->getBase(), HintRoot, CurDepth, St);
         }
 
@@ -513,6 +530,10 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                 Acc = joinStackProv(Acc, self(self, InitE, HintRoot, CurDepth, St));
             }
             return Acc;
+        }
+
+        if (const auto *CLE = dyn_cast<CompoundLiteralExpr>(Stripped)) {
+            return self(self, CLE->getInitializer(), HintRoot, CurDepth, St);
         }
 
         if (const auto *CE = dyn_cast<CallExpr>(Stripped)) {
@@ -615,6 +636,41 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         }
     };
 
+    auto checkAndRecordLhsSink = [&](const Expr *LhsExpr, const StackProv &SrcP, SourceLocation DiagLoc, CFGDataflowState &St) {
+        if (!LhsExpr || SrcP.Depth == 0u) return;
+        SinkBaseInfo SinkInfo = inspectAssignmentLHS(LhsExpr);
+        const VarDecl *BaseVD = SinkInfo.BaseVD;
+        if (!BaseVD) return;
+
+        if (BaseVD->hasGlobalStorage()) {
+            std::string Sink = "global '" + BaseVD->getNameAsString() + "'";
+            emitEscapeOnce(DiagLoc, SrcP, Sink);
+        } else if (isa<ParmVarDecl>(BaseVD) && SinkInfo.DereferencedPointer) {
+            std::string Sink = SinkInfo.FieldName.empty()
+                ? ("out-parameter '*" + BaseVD->getNameAsString() + "'")
+                : ("out-parameter field '" + BaseVD->getNameAsString() + "->" + SinkInfo.FieldName + "'");
+            emitEscapeOnce(DiagLoc, SrcP, Sink);
+        } else if (SinkInfo.DereferencedPointer) {
+            unsigned TargetDepth = St.Prov.lookup(BaseVD).Depth;
+            if (TargetDepth < SrcP.Depth) {
+                std::string Sink = SinkInfo.FieldName.empty()
+                    ? ("outer pointer '*" + BaseVD->getNameAsString() + "'")
+                    : ("outer field '" + BaseVD->getNameAsString() + "->" + SinkInfo.FieldName + "'");
+                emitEscapeOnce(DiagLoc, SrcP, Sink);
+            }
+        } else {
+            unsigned HolderDepth = VarScopeDepth.lookup(BaseVD);
+            if (HolderDepth < SrcP.Depth) {
+                std::string Sink = SinkInfo.FieldName.empty()
+                    ? ("outer variable '" + BaseVD->getNameAsString() + "'")
+                    : ("outer field '" + BaseVD->getNameAsString() + "." + SinkInfo.FieldName + "'");
+                emitEscapeOnce(DiagLoc, SrcP, Sink);
+            } else {
+                St.Prov[BaseVD] = joinStackProv(St.Prov.lookup(BaseVD), SrcP);
+            }
+        }
+    };
+
     // Statement transfer function (tracks evaluated Stmts within each basic block)
     auto transferStmt = [&](auto &self, const Stmt *S, unsigned BlockScopeFallback, CFGDataflowState &St, llvm::DenseSet<const Stmt *> &Evaluated) -> void {
         if (!S || !Evaluated.insert(S).second) return;
@@ -658,38 +714,7 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                 }
 
                 self(self, BO->getLHS(), CurDepth, St, Evaluated);
-                if (SrcP.Depth > 0u) {
-                    SinkBaseInfo SinkInfo = inspectAssignmentLHS(BO->getLHS());
-                    if (const VarDecl *BaseVD = SinkInfo.BaseVD) {
-                        if (BaseVD->hasGlobalStorage()) {
-                            std::string Sink = "global '" + BaseVD->getNameAsString() + "'";
-                            emitEscapeOnce(BO->getExprLoc(), SrcP, Sink);
-                        } else if (isa<ParmVarDecl>(BaseVD) && SinkInfo.DereferencedPointer) {
-                            std::string Sink = SinkInfo.FieldName.empty()
-                                ? ("out-parameter '*" + BaseVD->getNameAsString() + "'")
-                                : ("out-parameter field '" + BaseVD->getNameAsString() + "->" + SinkInfo.FieldName + "'");
-                            emitEscapeOnce(BO->getExprLoc(), SrcP, Sink);
-                        } else if (SinkInfo.DereferencedPointer) {
-                            unsigned TargetDepth = St.Prov.lookup(BaseVD).Depth;
-                            if (TargetDepth < SrcP.Depth) {
-                                std::string Sink = SinkInfo.FieldName.empty()
-                                    ? ("outer pointer '*" + BaseVD->getNameAsString() + "'")
-                                    : ("outer field '" + BaseVD->getNameAsString() + "->" + SinkInfo.FieldName + "'");
-                                emitEscapeOnce(BO->getExprLoc(), SrcP, Sink);
-                            }
-                        } else {
-                            unsigned HolderDepth = VarScopeDepth.lookup(BaseVD);
-                            if (HolderDepth < SrcP.Depth) {
-                                std::string Sink = SinkInfo.FieldName.empty()
-                                    ? ("outer variable '" + BaseVD->getNameAsString() + "'")
-                                    : ("outer field '" + BaseVD->getNameAsString() + "." + SinkInfo.FieldName + "'");
-                                emitEscapeOnce(BO->getExprLoc(), SrcP, Sink);
-                            } else {
-                                St.Prov[BaseVD] = joinStackProv(St.Prov.lookup(BaseVD), SrcP);
-                            }
-                        }
-                    }
-                }
+                checkAndRecordLhsSink(BO->getLHS(), SrcP, BO->getExprLoc(), St);
                 return;
             }
         }
@@ -713,6 +738,19 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                         if (checkVarNotConsumed(FreedVD, CE->getArg(1)->getExprLoc(), /*CheckFreedToo=*/true, St)) {
                             markFreedVarAndRoots(FreedVD, St);
                         }
+                    }
+                    return;
+                }
+
+                if (FnCallee == "__vspan_init_raw" && CE->getNumArgs() >= 3) {
+                    for (unsigned i = 0; i < CE->getNumArgs(); ++i) {
+                        self(self, CE->getArg(i), CurDepth, St, Evaluated);
+                    }
+                    StackProv SrcP = evalProvenance(evalProvenance, CE->getArg(2), "", CurDepth, St);
+                    const Expr *OutPtrArg = CE->getArg(0)->IgnoreParenCasts();
+                    if (const auto *AddrUO = dyn_cast<UnaryOperator>(OutPtrArg);
+                        AddrUO && AddrUO->getOpcode() == UO_AddrOf) {
+                        checkAndRecordLhsSink(AddrUO->getSubExpr(), SrcP, CE->getExprLoc(), St);
                     }
                     return;
                 }
