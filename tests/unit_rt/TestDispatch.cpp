@@ -178,3 +178,58 @@ TEST(VeriObjC_Dispatch, ObjectDispatchResolvesViaIsaAndGuardsNullObject) {
     POINTERS_EQUAL(nullptr, (void *)veriobjc_dispatch_by_sel_name(obj, nullptr));
     POINTERS_EQUAL(nullptr, (void *)veriobjc_dispatch_by_sel_name(obj, "unregistered:"));
 }
+
+// Contract 5: Closed-world 16-bit @sealed type tag & prefix-header arena allocation
+TEST(VeriObjC_Dispatch, SealedTypeTagAndArenaPrefixAllocation) {
+    // Null and empty class names return tag 0; valid class names fold FNV-1a-32 to non-zero 16-bit tags
+    LONGS_EQUAL(0u, veriobjc_type_tag_from_name(nullptr));
+    LONGS_EQUAL(0u, veriobjc_type_tag_from_name(""));
+
+    veriobjc_type_tag_t tag_base = veriobjc_type_tag_from_name("SealedComputeNode");
+    veriobjc_type_tag_t tag_sub1 = veriobjc_type_tag_from_name("LinearComputeNode");
+    veriobjc_type_tag_t tag_sub2 = veriobjc_type_tag_from_name("AffineComputeNode");
+    CHECK(tag_base != 0u);
+    CHECK(tag_sub1 != 0u);
+    CHECK(tag_sub2 != 0u);
+    CHECK(tag_base != tag_sub1);
+    CHECK(tag_sub1 != tag_sub2);
+    LONGS_EQUAL(tag_sub1, veriobjc_type_tag_from_name("LinearComputeNode"));
+
+    struct DummySubPayload {
+        int32_t base_bias;
+        int32_t slope;
+        int32_t input_x;
+    };
+
+    alignas(16) uint8_t buf[64];
+    for (size_t i = 0; i < sizeof(buf); ++i) {
+        buf[i] = 0xAAu;
+    }
+    struct veriobjc_stack stack;
+    veriobjc_stack_init(&stack, buf, sizeof(buf));
+
+    // Null / invalid guards on veriobjc_sealed_alloc and veriobjc_sealed_tag
+    POINTERS_EQUAL(nullptr, veriobjc_sealed_alloc(nullptr, sizeof(DummySubPayload), tag_sub1));
+    POINTERS_EQUAL(nullptr, veriobjc_sealed_alloc(&stack, sizeof(DummySubPayload), 0u));
+    POINTERS_EQUAL(nullptr, veriobjc_sealed_alloc(&stack, SIZE_MAX, tag_sub1));
+    POINTERS_EQUAL(nullptr, veriobjc_sealed_alloc(&stack, sizeof(buf), tag_sub1));
+    LONGS_EQUAL(0u, veriobjc_sealed_tag(nullptr));
+
+    {
+        VERIOBJC_SCOPED_STACK(&stack);
+        DummySubPayload *sub = veriobjc_alloc_sealed(DummySubPayload, &stack);
+        CHECK(sub != nullptr);
+        // Zero-initialized payload at offset 0 and prefix tag at [-8]
+        LONGS_EQUAL(0, sub->base_bias);
+        LONGS_EQUAL(0, sub->slope);
+        LONGS_EQUAL(0, sub->input_x);
+        LONGS_EQUAL(veriobjc_type_tag_from_name("DummySubPayload"), veriobjc_sealed_tag(sub));
+
+        // Zero-ivar / 0-byte instance allocation still places a valid 8-byte prefix header
+        void *empty_inst = veriobjc_sealed_alloc(&stack, 0u, tag_base);
+        CHECK(empty_inst != nullptr);
+        LONGS_EQUAL(tag_base, veriobjc_sealed_tag(empty_inst));
+    }
+
+    LONGS_EQUAL(0u, veriobjc_stack_used(&stack));
+}

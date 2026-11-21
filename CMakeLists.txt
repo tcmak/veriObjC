@@ -240,3 +240,8 @@ add_test(NAME ban_corpus_tests
 add_test(NAME vstd_cohesion_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/check_vstd_cohesion.sh ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Test target for End-to-End Freestanding @sealed Polymorphism Gate
+add_test(NAME e2e_sealed_polymorphism_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_e2e_sealed_polymorphism_test.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
+)
