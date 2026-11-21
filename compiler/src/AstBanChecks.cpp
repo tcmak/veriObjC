@@ -809,23 +809,13 @@ void VeriObjCVisitor::verifyExportFunctionAndEmitHeader(const FunctionDecl *D) {
             return;
         }
     }
-    llvm::StringRef PreExpr = "true";
-    llvm::StringRef PostExpr = "true";
     for (const auto *A : D->specific_attrs<AnnotateAttr>()) {
         llvm::StringRef Ann = A->getAnnotation();
         if (Ann.starts_with("objc_pre:")) {
-            PreExpr = Ann.drop_front(9);
-            if (Opts.EmitExportHeader) llvm::errs() << "// @pre(" << PreExpr << ")\n";
+            if (Opts.EmitExportHeader) llvm::errs() << "// @pre(" << Ann.drop_front(9) << ")\n";
         } else if (Ann.starts_with("objc_post:")) {
-            PostExpr = Ann.drop_front(10);
-            if (Opts.EmitExportHeader) llvm::errs() << "// @post(" << PostExpr << ")\n";
+            if (Opts.EmitExportHeader) llvm::errs() << "// @post(" << Ann.drop_front(10) << ")\n";
         }
-    }
-    if (Opts.EmitSmtReport) {
-        llvm::errs() << "[VeriObjC --smt-report] Function: " << D->getName()
-                     << " | Pre: (assert (" << PreExpr << "))"
-                     << " | Post: (assert (not (" << PostExpr << ")))"
-                     << " | Solver: UNIMPLEMENTED_STUB (no external SMT solver invoked)\n";
     }
     if (!Opts.EmitExportHeader) return;
     llvm::errs() << "extern " << D->getReturnType().getAsString() << " " << D->getName() << "(";

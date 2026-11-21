@@ -1031,6 +1031,9 @@ void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
     if (auto *FD = dyn_cast<FunctionDecl>(D)) {
         if (!FD->hasBody()) return;
         auditFunctionEffectsAndReport(FD);
+        if (hasContractAnnotations(FD)) {
+            ContractedFunctions.push_back(FD);
+        }
         collectErrorReturnGraph(FD->getBody(), FD->getCanonicalDecl());
         recordDspGraphForBody(FD, FD->getBody());
         if (hasVeriObjCAnnotation(FD, "objc_hw_kernel")) {
@@ -1081,6 +1084,7 @@ void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
 void VeriObjCVisitor::finalizeTranslationUnitAudits() {
     verifyMultiFrameErrorReturns();
     verifyAllHwKernelsZeroDsp();
+    verifyAllContractedFunctions();
     uint32_t UnusedWCET = 0;
     verifyTaskDAGAndComputeWCET(SourceLocation(), UnusedWCET);
     if (!Context->getDiagnostics().hasErrorOccurred() && Opts.EmitMonoReport) {

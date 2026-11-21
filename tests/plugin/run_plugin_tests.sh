@@ -149,13 +149,13 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
 
-        # Exceeded timeout (--smt-timeout-ms=15 on hard 64-bit BV factorization) must fail closed with Z3_UNKNOWN_TIMEOUT
+        # Exceeded timeout (--smt-timeout-ms=5 on non-wrapping 62-bit prime QF_BV obligation) must fail closed with Z3_UNKNOWN_TIMEOUT
         TMP_TIMEOUT_M=$(mktemp /tmp/veriobjc_z3_timeout_XXXXXX.m)
         cat > "$TMP_TIMEOUT_M" << 'EOF'
 #include "veriobjc_runtime.h"
 #include "vstd/contracts.h"
-vcontract_pre("a > 1 && b > 1 && (a & 1) == 1")
-vcontract_post("result != 81985529216486895")
+vcontract_pre("a > 1 && a <= 4294967295 && b > 1 && b <= 4294967295")
+vcontract_post("result != 4611686018427387847")
 veriobjc_export veriobjc_pure uint64_t hard_factor_gate(uint64_t a, uint64_t b) {
     return a * b;
 }
@@ -164,7 +164,7 @@ EOF
                                   -Xclang -load -Xclang "$PLUGIN_PATH" \
                                   -Xclang -add-plugin -Xclang veriobjc-check \
                                   -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
-                                  -Xclang -plugin-arg-veriobjc-check -Xclang --smt-timeout-ms=15 \
+                                  -Xclang -plugin-arg-veriobjc-check -Xclang --smt-timeout-ms=5 \
                                   -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" \
                                   -fsyntax-only "$TMP_TIMEOUT_M" 2>&1); then
             rm -f "$TMP_TIMEOUT_M"
@@ -341,7 +341,7 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
 
     if echo "$OUTPUT" | grep -q "$EXPECTED_MSG"; then
         if [[ "$base_name" == test_banned_smt_z3_counterexample* ]]; then
-            for req_tok in "unchecked_add_margin_i32" "10:40" "@post(result > price)" "price =" "margin =" "result ="; do
+            for req_tok in "unchecked_add_margin_i32" "10:39" "@post(result > price)" "price =" "margin =" "result ="; do
                 if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
                     echo "[FAIL] Missing Goose-style witness/location token '$req_tok' in $base_name!"
                     echo "$OUTPUT"

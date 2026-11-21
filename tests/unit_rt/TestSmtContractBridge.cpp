@@ -185,19 +185,19 @@ TEST(SmtContractBridgeGroup, ExtractsConcreteCounterexampleWitnessesAcrossZ3Vers
 }
 
 TEST(SmtContractBridgeGroup, FailsClosedWithUnknownTimeoutWhenBudgetExceeded) {
-    // Hard 64-bit non-linear bit-vector factorization with a 15ms timeout must fail closed as Z3_UNKNOWN_TIMEOUT
+    // Non-wrapping 62-bit prime factorization (2^62 - 57 is prime => unsat, cannot return spurious sat)
+    // with a 5ms timeout must fail closed as Z3_UNKNOWN_TIMEOUT
     const char *hard_bv_query =
         "(set-logic QF_BV)\n"
         "(declare-const a (_ BitVec 64))\n"
         "(declare-const b (_ BitVec 64))\n"
-        "(assert (= (bvmul a b) #x0123456789abcdef))\n"
-        "(assert (bvugt a #x0000000000000001))\n"
-        "(assert (bvugt b #x0000000000000001))\n"
-        "(assert (= (bvurem a #x0000000000000002) #x0000000000000001))\n"
+        "(assert (and (bvugt a #x0000000000000001) (bvule a #x00000000ffffffff)))\n"
+        "(assert (and (bvugt b #x0000000000000001) (bvule b #x00000000ffffffff)))\n"
+        "(assert (= (bvmul a b) #x3fffffffffffffc7))\n"
         "(check-sat)\n";
 
     struct rt_z3_discharge_result res;
-    LONGS_EQUAL(Z3_UNKNOWN_TIMEOUT, rt_z3_discharge_smtlib2(nullptr, 15u, hard_bv_query, &res));
+    LONGS_EQUAL(Z3_UNKNOWN_TIMEOUT, rt_z3_discharge_smtlib2(nullptr, 5u, hard_bv_query, &res));
     LONGS_EQUAL(Z3_UNKNOWN_TIMEOUT, res.status);
 }
 

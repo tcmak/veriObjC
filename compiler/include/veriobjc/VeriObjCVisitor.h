@@ -38,6 +38,9 @@ struct VeriObjCPluginOptions {
     bool EmitMonoReport = false;
     bool EmitExportHeader = false;
     bool EmitSmtReport = false;
+    bool SmtVerify = false;
+    uint32_t SmtTimeoutMs = 2000u;
+    std::string Z3Path;
 };
 
 struct CompiledDFA {
@@ -105,6 +108,7 @@ private:
     llvm::StringMap<clang::FunctionDecl *> DedupBlockDecls;
     llvm::StringMap<MonoGenericEntry> MonoGenericStats;
     std::vector<DAGEdgeRecord> DAGEdges;
+    std::vector<const clang::FunctionDecl *> ContractedFunctions;
     unsigned MonoBlockCounter = 0;
     std::map<std::pair<const clang::FunctionDecl *, std::vector<int64_t>>, int64_t> VConstexprMemo;
     llvm::StringMap<clang::VarDecl *> CompiledDFADecls;
@@ -325,6 +329,13 @@ private:
     // ContainerChecks.cpp
     // -----------------------------------------------------------------------
     bool extractVVectorCapacityFromRecord(const clang::RecordDecl *RD, uint32_t &OutCap) const;
+
+    // -----------------------------------------------------------------------
+    // SmtContractVerifier.cpp
+    // -----------------------------------------------------------------------
+    static bool hasContractAnnotations(const clang::FunctionDecl *FD);
+    void verifyFunctionContractWithZ3(const clang::FunctionDecl *FD);
+    void verifyAllContractedFunctions();
     const clang::FieldDecl *findNonFlatField(clang::QualType T) const;
     void checkFlatPayloadType(clang::QualType T, llvm::StringRef TypeName, clang::SourceLocation Loc);
     static const clang::VarDecl *extractVResultIsOkVar(const clang::Expr *Cond);

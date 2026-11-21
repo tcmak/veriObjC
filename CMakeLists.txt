@@ -235,10 +235,13 @@ add_library(VeriObjCPlugin MODULE
     compiler/src/CfgDataflowChecks.cpp
     compiler/src/StaticDispatchLowering.cpp
     compiler/src/ContainerChecks.cpp
+    compiler/src/SmtContractVerifier.cpp
 )
 
 target_include_directories(VeriObjCPlugin PRIVATE
     compiler/include
+    host/include
+    rt/include
 )
 
 target_include_directories(VeriObjCPlugin SYSTEM PRIVATE

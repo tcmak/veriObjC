@@ -71,13 +71,45 @@ protected:
     }
 
     bool ParseArgs(const CompilerInstance &CI, const std::vector<std::string> &args) override {
-        for (const std::string &A : args) {
+        auto emitArgError = [&](llvm::StringRef Msg, llvm::StringRef Val) {
+            DiagnosticsEngine &Diag = CI.getDiagnostics();
+            unsigned ID = Diag.getCustomDiagID(DiagnosticsEngine::Error, "VeriObjC Plugin: %0 '%1'");
+            Diag.Report(ID) << Msg << Val;
+            return false;
+        };
+
+        for (size_t i = 0; i < args.size(); ++i) {
+            llvm::StringRef A(args[i]);
             if (A == "--effects-report") Opts.EmitEffectsReport = true;
             else if (A == "--branch-report") Opts.EmitBranchReport = true;
             else if (A == "--mono-report") Opts.EmitMonoReport = true;
             else if (A == "--export-header-stdout") Opts.EmitExportHeader = true;
             else if (A == "--smt-report") Opts.EmitSmtReport = true;
-            else {
+            else if (A == "--smt-verify") Opts.SmtVerify = true;
+            else if (A.starts_with("--smt-timeout-ms=")) {
+                unsigned Val = 0;
+                if (A.drop_front(17).getAsInteger(10, Val) || Val == 0u) {
+                    return emitArgError("invalid --smt-timeout-ms value", A);
+                }
+                Opts.SmtTimeoutMs = Val;
+            } else if (A == "--smt-timeout-ms" && i + 1 < args.size()) {
+                unsigned Val = 0;
+                if (llvm::StringRef(args[++i]).getAsInteger(10, Val) || Val == 0u) {
+                    return emitArgError("invalid --smt-timeout-ms value", args[i]);
+                }
+                Opts.SmtTimeoutMs = Val;
+            } else if (A.starts_with("--z3-path=")) {
+                llvm::StringRef P = A.drop_front(10);
+                if (P.empty()) {
+                    return emitArgError("empty --z3-path argument", A);
+                }
+                Opts.Z3Path = P.str();
+            } else if (A == "--z3-path" && i + 1 < args.size()) {
+                Opts.Z3Path = args[++i];
+                if (Opts.Z3Path.empty()) {
+                    return emitArgError("empty --z3-path argument", A);
+                }
+            } else {
                 DiagnosticsEngine &Diag = CI.getDiagnostics();
                 unsigned ID = Diag.getCustomDiagID(
                     DiagnosticsEngine::Error,
