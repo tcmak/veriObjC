@@ -1,7 +1,7 @@
 // examples/vvector_inplace_batch.m
-// Demonstrates Task 3.3, Task 3.3b & Task 3.3c (<vstd/vector.h>):
+// Demonstrates Task 3.3, Task 3.3b & Task C2.1b (<vstd/vector.h>):
 //   - Constrained vgeneric @interface VVector<T : VVectorItem *> with devirtualized methods & range-for
-//   - Single unified container vvector<T, N> (VG-005) and flat VVector<T> by-value return (VG-006)
+//   - AST-checked VVector_decl / VVector(T, N) C11 macro containers with arbitrary capacities N (N = 4, N = 8)
 //   - Built-in-place slot construction via vvector_push_inplace
 #include "veriobjc_runtime.h"
 #include "vstd/vector.h"
@@ -17,20 +17,23 @@ __attribute__((annotate("objc_final")))
 @implementation OrderBatchItem
 @end
 
+VVector_decl(int32_t, 4);
+VVector_decl(OrderBatchVec8, OrderBatchItem *, 8);
+
 static void construct_order_lot_inplace(int32_t *out_slot, int32_t base_qty) {
     if (out_slot) {
         *out_slot = base_qty * 100;
     }
 }
 
-VVector<OrderBatchItem *> build_order_batch_by_value(
+OrderBatchVec8 build_order_batch_by_value(
     OrderBatchItem *item0,
     OrderBatchItem *item1
 ) {
-    VVector<OrderBatchItem *> out;
-    [&out initVec];
-    [&out push:item0];
-    [&out push:item1];
+    OrderBatchVec8 out;
+    vvector_init(&out);
+    vvector_push(&out, item0);
+    vvector_push(&out, item1);
     return out;
 }
 
@@ -57,19 +60,29 @@ int32_t run_vvector_batch_demo(void) {
         uint32_t item_tag;
         int32_t qty;
     } raw0 = {1u, 25}, raw1 = {2u, 25};
+    struct {
+        uint32_t count;
+        uint32_t cap;
+        OrderBatchItem *buf[VVECTOR_GENERIC_CAPACITY];
+    } obj_storage;
 
-    VVector<OrderBatchItem *> by_val_vec = build_order_batch_by_value(
+    OrderBatchVec8 by_val_vec = build_order_batch_by_value(
         (OrderBatchItem *)&raw0,
         (OrderBatchItem *)&raw1
     );
+    OrderBatchItem **first_slot = vvector_at(&by_val_vec, 0u);
+    OrderBatchItem **second_slot = vvector_at(&by_val_vec, 1u);
+    if (!first_slot || !second_slot || vvector_cap(&by_val_vec) != 8u) {
+        return 0;
+    }
 
     int32_t generic_sum = evaluate_generic_order_batch(
-        (VVector<OrderBatchItem *> *)&by_val_vec,
-        (OrderBatchItem *)&raw0,
-        (OrderBatchItem *)&raw1
+        (VVector<OrderBatchItem *> *)&obj_storage,
+        *first_slot,
+        *second_slot
     );
 
-    vvector<int32_t, 4> batch;
+    VVector(int32_t, 4) batch;
     vvector_init(&batch);
     vvector_push(&batch, generic_sum);
     vvector_push_inplace(&batch, construct_order_lot_inplace, 3);

@@ -6,6 +6,24 @@ using namespace clang;
 
 namespace veriobjc {
 
+bool VeriObjCVisitor::extractVVectorCapacityFromRecord(const RecordDecl *RD, uint32_t &OutCap) const {
+    if (!RD) return false;
+    if (extractAnnotatedCapacity(RD, "objc_vvector:", OutCap)) {
+        return true;
+    }
+    if (!hasVeriObjCAnnotation(RD, "veriobjc_vvector")) {
+        return false;
+    }
+    for (const FieldDecl *FD : RD->fields()) {
+        if (FD->getName() != "buf") continue;
+        if (const ConstantArrayType *CAT = Context->getAsConstantArrayType(FD->getType())) {
+            OutCap = static_cast<uint32_t>(CAT->getSize().getZExtValue());
+            return true;
+        }
+    }
+    return false;
+}
+
 const FieldDecl *VeriObjCVisitor::findNonFlatField(QualType T) const {
     if (T.isNull()) return nullptr;
     while (const auto *AT = Context->getAsArrayType(T)) T = AT->getElementType();
@@ -160,7 +178,7 @@ void VeriObjCVisitor::analyzeVResultAndStackArrays(
                     const auto *RT = VecVD->getType()->getAs<RecordType>();
                     const RecordDecl *RD = RT ? RT->getDecl()->getDefinition() : nullptr;
                     uint32_t Cap = 0;
-                    if (extractAnnotatedCapacity(RD, "objc_vvector:", Cap)) {
+                    if (extractVVectorCapacityFromRecord(RD, Cap)) {
                         uint32_t Count = ++VVectorPushCounts[VecVD];
                         if (Count > Cap) {
                             reportError(CE->getExprLoc(), "VeriObjC Violation: vvector push exceeds static capacity %0 on '%1'.")
@@ -266,16 +284,16 @@ void VeriObjCVisitor::checkInterfaceByValueRecord(const RecordDecl *D, SourceLoc
     }
 
     uint32_t VVecCap = 0;
-    if (extractAnnotatedCapacity(D, "objc_vvector:", VVecCap)) {
+    if (extractVVectorCapacityFromRecord(D, VVecCap)) {
         for (const FieldDecl *FD : D->fields()) {
             if (FD->getName() != "buf") continue;
             if (const ConstantArrayType *CAT = Context->getAsConstantArrayType(FD->getType())) {
                 QualType ElemTy = CAT->getElementType();
                 if (const auto *OPT = ElemTy->getAs<ObjCObjectPointerType>()) {
                     if (const ObjCInterfaceDecl *ElemID = OPT->getInterfaceDecl()) {
-                        if (!isSealedClass(ElemID)) {
+                        if (!isSealedClass(ElemID) && !isFinalClass(ElemID)) {
                             reportError(Loc, "VeriObjC Violation: Invalid vgeneric type argument '%0': type arguments to constrained generics must be @sealed classes.")
-                                << ElemTy.getAsString();
+                                << ElemID->getName();
                         }
                     }
                 }

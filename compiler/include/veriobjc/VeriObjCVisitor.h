@@ -299,6 +299,7 @@ private:
     // -----------------------------------------------------------------------
     // ContainerChecks.cpp
     // -----------------------------------------------------------------------
+    bool extractVVectorCapacityFromRecord(const clang::RecordDecl *RD, uint32_t &OutCap) const;
     const clang::FieldDecl *findNonFlatField(clang::QualType T) const;
     void checkFlatPayloadType(clang::QualType T, llvm::StringRef TypeName, clang::SourceLocation Loc);
     static const clang::VarDecl *extractVResultIsOkVar(const clang::Expr *Cond);

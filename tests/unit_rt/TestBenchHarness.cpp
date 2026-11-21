@@ -5,11 +5,13 @@
 #include "host/bench_harness.h"
 #include "vstd/vector.h"
 
+VVector_decl(int32_t, 4);
+
 TEST_GROUP(BenchHarnessGroup) {};
 
 TEST(BenchHarnessGroup, CycleCounterAndPercentileStatsOnVVectorContainer) {
     uint64_t c0 = rt_bench_read_cycles();
-    vvector<int32_t, 4> vec;
+    VVector(int32_t, 4) vec;
     vvector_init(&vec);
     vvector_push(&vec, 10);
     vvector_push(&vec, 20);

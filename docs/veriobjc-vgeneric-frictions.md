@@ -91,8 +91,8 @@ Per the Phase 3 Execution Guide (*"expect compiler friction, and treat every fri
 
 ## 5. Friction `VG-005`: `vgeneric` Lacks Value / Integer Parameters and Non-Pointer Value Type Arguments (Blocks `vvector<T, N>`)
 
-- **Component:** Clang Objective-C `ObjCTypeParamList` Parser / `VeriObjCPlugin.cpp` (`lowerVVectorAndByValueInterfacesInSource`, `checkInterfaceByValueRecord`)
-- **Status:** Resolved in **Task 3.3c** (`__vvector_storage_def` bridge deleted; `<vstd/vector.h>` exposes a single unified container surface)
+- **Component:** Clang Objective-C `ObjCTypeParamList` Parser / `vstd/include/vstd/vector.h` & `compiler/src/ContainerChecks.cpp`
+- **Status:** Resolved in **Task 3.3c / Task C2.1b** (source-text rewriter deleted; pure C11/C23 `VVector_decl` / `VVector(T, N)` macros with AST `annotate("veriobjc_vvector")` inspection)
 - **Minimal Reproducer:**
   ```objc
   // 1. Non-type integer capacity parameter N is rejected by Clang's ObjC generic parser:
@@ -104,30 +104,32 @@ Per the Phase 3 Execution Guide (*"expect compiler friction, and treat every fri
   @end
 
   // 2. Scalar / flat C struct value specialization is rejected by Clang's ObjC type parameter check:
-  vvector<int32_t, 4> batch;
+  VVector_decl(int32_t, 8);
+  VVector(int32_t, 8) batch;
   ```
 - **Symptom:**
-  Clang's built-in Objective-C lightweight generic grammar (`ParseObjCTypeParamList` / `Sema::ActOnObjCTypeParam`) requires every parameter in `<...>` to be an Objective-C object pointer type (`id` or `ClassName *`). Integer capacity constants (`N`) and flat value types (`int32_t`, `@flat struct`) cannot be passed as `<T, N>` arguments without a custom frontend/plugin lowering pass.
-- **Resolution (Task 3.3c):**
-  Implemented `vvector<T, N>` pre-Sema monomorphization lowering in `VeriObjCAction::CreateASTConsumer` (`lowerVVectorAndByValueInterfacesInSource`) paired with `VeriObjCVisitor::checkInterfaceByValueRecord` and the C++ `template <typename ElemType, uint32_t Cap> struct vvector` definition in `<vstd/vector.h>`, then deleted the deprecated internal `__vvector_storage_def` bridge macro.
+  Clang's built-in Objective-C lightweight generic grammar (`ParseObjCTypeParamList` / `Sema::ActOnObjCTypeParam`) requires every parameter in `<...>` to be an Objective-C object pointer type (`id` or `ClassName *`). Integer capacity constants (`N`) and flat value types (`int32_t`, `@flat struct`) cannot be passed as `<T, N>` arguments in standard `.m` sources.
+- **Resolution (Task C2.1b):**
+  Eliminated the fragile source-text string rewriter completely and implemented `VVector_decl(T, N)` / `VVector_decl(Name, T, N)` / `VVector(T, N)` in `<vstd/vector.h>` backed by `_Static_assert` and `__attribute__((annotate("veriobjc_vvector")))`. `ContainerChecks.cpp` extracts the array capacity `N` and element sealing invariants directly from Clang's `ConstantArrayType` AST node, working cleanly in `.h` headers without `@end`, preserving `"vvector<int, 4>"` string literals untouched, and supporting arbitrary capacities `N` by value.
 
 ---
 
 ## 6. Friction `VG-006`: Flat `@interface` Cannot Be Statically Allocated or Returned by Value (Blocks Return-by-Value on `VVector<T>`)
 
-- **Component:** Clang Objective-C Sema (`SemaType.cpp` / `SemaDecl.cpp`) / `VeriObjCPlugin.cpp` (`lowerVVectorAndByValueInterfacesInSource`, `checkInterfaceByValueRecord`)
-- **Status:** Resolved in **Task 3.3c** (`__vvector_storage_def` bridge deleted; ban-corpus enforcement added in `test_banned_nonflat_interface_by_value.m` and `valid_objc_nonflat_interface_by_value.m`)
+- **Component:** Clang Objective-C Sema (`SemaType.cpp` / `SemaDecl.cpp`) / `vstd/include/vstd/vector.h` & `compiler/src/ContainerChecks.cpp`
+- **Status:** Resolved in **Task 3.3c / Task C2.1b** (`VVector_decl(Name, Elem *, N)` & `vinterface_by_value`; ban-corpus enforcement in `test_banned_nonflat_interface_by_value.m` and `valid_objc_nonflat_interface_by_value.m`)
 - **Minimal Reproducer:**
   ```objc
-  VVector<OrderLotItem *> build_generic_vvector_by_value(OrderLotItem *a, OrderLotItem *b) {
-      VVector<OrderLotItem *> out;
-      [&out initVec];
-      [&out push:a];
-      [&out push:b];
+  VVector_decl(OrderLotVec8, OrderLotItem *, 8);
+  OrderLotVec8 build_generic_vvector_by_value(OrderLotItem *a, OrderLotItem *b) {
+      OrderLotVec8 out;
+      vvector_init(&out);
+      vvector_push(&out, a);
+      vvector_push(&out, b);
       return out;
   }
   ```
 - **Symptom:**
   Stock Clang's Objective-C Sema unconditionally forbids non-pointer `ObjCObjectType` in local variable declarations, parameter types, and function return types (`diag::err_objc_object_assignment` / `diag::err_statically_allocated_object`), even when the `@interface` is `@final`, `@sealed`, and has a fixed compile-time layout (`count`, `cap`, `buf[N]`).
-- **Resolution (Task 3.3c):**
-  Lowered value-allocated and by-value-returned `VVector<T>` (and `@flat @final @sealed` `@interface` types) to C value-record layouts carrying `annotate("objc_interface_by_value:<InterfaceName>")`, while `VeriObjCVisitor::checkInterfaceByValueRecord` rejects any non-`@flat @final @sealed` `@interface` allocated or returned by value with `"VeriObjC Violation: Interface '%0' cannot be allocated or returned by value: only @flat @final @sealed interfaces support value semantics (VG-006)."`
+- **Resolution (Task C2.1b):**
+  Value-allocated and by-value-returned vectors of `@sealed` object pointers use `VVector_decl(Name, Elem *, N)` (carrying `annotate("veriobjc_vvector")` with AST-checked `@sealed` element bounds and arbitrary capacity `N`), while `vinterface_by_value(InterfaceName)` carries `annotate("objc_interface_by_value:<InterfaceName>")` so `VeriObjCVisitor::checkInterfaceByValueRecord` rejects any non-`@flat @final @sealed` `@interface` value carrier with `"VeriObjC Violation: Interface '%0' cannot be allocated or returned by value: only @flat @final @sealed interfaces support value semantics (VG-006)."`

@@ -12,7 +12,9 @@ __attribute__((objc_root_class))
 @implementation UnsealedPacket
 @end
 
-UnsealedPacket build_unsealed_packet_by_value(void) {
-    UnsealedPacket pkt;
+typedef vinterface_by_value(UnsealedPacket) UnsealedPacketByVal;
+
+UnsealedPacketByVal build_unsealed_packet_by_value(void) {
+    UnsealedPacketByVal pkt = {0u};
     return pkt;
 }

@@ -9,7 +9,12 @@
 #include "vstd/stream.h"
 #include "vstd/ternary.h"
 
-using IntVec4 = vvector<int32_t, 4>;
+VVector_decl(int32_t, 4);
+VVector_decl(int32_t, 8);
+VVector_decl(int32_t, 16);
+using IntVec4 = VVector(int32_t, 4);
+using IntVec8 = VVector(int32_t, 8);
+using IntVec16 = VVector(int32_t, 16);
 vflat_map_def(OrderFlatMap4, uint64_t, int32_t, 4);
 vhash_flat_def(OrderHashMap8, uint64_t, int32_t, 8);
 
@@ -67,6 +72,28 @@ TEST(VstdWave2And3Group, InplaceVectorOperationsAndBounds) {
     LONGS_EQUAL(44, *vvector_at(&vec, 3u));
     POINTERS_EQUAL(nullptr, vvector_at(&vec, 4u));
     POINTERS_EQUAL(nullptr, vvector_at((const IntVec4 *)nullptr, 0u));
+
+    // Arbitrary by-value capacities N = 8 and N = 16 + untouched angle-bracket string literal
+    IntVec8 vec8;
+    vvector_init(&vec8);
+    LONGS_EQUAL(8u, vvector_cap(&vec8));
+    for (int32_t i = 0; i < 8; ++i) {
+        CHECK_TRUE(vvector_push(&vec8, i * 3));
+    }
+    CHECK_FALSE(vvector_push(&vec8, 99));
+    LONGS_EQUAL(21, *vvector_at(&vec8, 7u));
+
+    IntVec16 vec16;
+    vvector_init(&vec16);
+    LONGS_EQUAL(16u, vvector_cap(&vec16));
+    for (int32_t i = 0; i < 16; ++i) {
+        CHECK_TRUE(vvector_push(&vec16, i + 100));
+    }
+    CHECK_FALSE(vvector_push(&vec16, 999));
+    LONGS_EQUAL(115, *vvector_at(&vec16, 15u));
+
+    const char *literal_probe = "vvector<int, 4>";
+    STRCMP_EQUAL("vvector<int, 4>", literal_probe);
 }
 
 #ifdef __OBJC__

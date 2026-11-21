@@ -13,6 +13,8 @@ __attribute__((objc_final))
 @implementation OrderLotItem
 @end
 
+VVector_decl(int32_t, 4);
+VVector_decl(OrderLotVec8, OrderLotItem *, 8);
 vstack_array_def(StackIntArr, int32_t);
 
 static int32_t parse_lot_value(int32_t raw) {
@@ -25,21 +27,21 @@ static void parse_into_slot(int32_t *out_slot, int32_t raw) {
     }
 }
 
-// VG-005: vvector<T, N> value-parameter generic container returned by value
-vvector<int32_t, 4> build_vector_by_value(int32_t seed) {
-    vvector<int32_t, 4> batch;
+// VG-005: VVector(T, N) value-parameter container returned by value
+VVector(int32_t, 4) build_vector_by_value(int32_t seed) {
+    VVector(int32_t, 4) batch;
     vvector_init(&batch);
     vvector_push(&batch, parse_lot_value(seed));
     vvector_push_inplace(&batch, parse_into_slot, seed);
     return batch;
 }
 
-// VG-006: Flat @final @sealed @interface VVector<T> allocated on stack & returned by value
-VVector<OrderLotItem *> build_generic_vvector_by_value(OrderLotItem *a, OrderLotItem *b) {
-    VVector<OrderLotItem *> out;
-    [&out initVec];
-    [&out push:a];
-    [&out push:b];
+// VG-006: Arbitrary-capacity VVector of @sealed object pointers returned by value (N = 8)
+OrderLotVec8 build_generic_vvector_by_value(OrderLotItem *a, OrderLotItem *b) {
+    OrderLotVec8 out;
+    vvector_init(&out);
+    vvector_push(&out, a);
+    vvector_push(&out, b);
     return out;
 }
 
@@ -70,12 +72,12 @@ int32_t run_valid_vvector(VVector<OrderLotItem *> *vec, OrderLotItem *a, OrderLo
         }
     }
 
-    vvector<int32_t, 4> by_val = build_vector_by_value(3);
+    VVector(int32_t, 4) by_val = build_vector_by_value(3);
     int32_t *p = vvector_at(&by_val, 0u);
 
-    VVector<OrderLotItem *> obj_by_val = build_generic_vvector_by_value(a, b);
-    OrderLotItem *second = [&obj_by_val at:1u];
-    int32_t obj_val = second ? second->lot_qty : 0;
+    OrderLotVec8 obj_by_val = build_generic_vvector_by_value(a, b);
+    OrderLotItem **second_slot = vvector_at(&obj_by_val, 1u);
+    int32_t obj_val = (second_slot && *second_slot) ? (*second_slot)->lot_qty : 0;
 
     return acc + (p ? *p : 0) + obj_val;
 }

@@ -71,6 +71,13 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
             exit 1
         fi
     fi
+    if [[ "$(basename "$pos_file")" == "test_valid_vvector_header_and_caps.m" ]]; then
+        if ! strings "$TMP_OBJ" | grep -Fxq "vvector<int, 4>"; then
+            echo "[FAIL] String literal 'vvector<int, 4>' was corrupted or missing in test_valid_vvector_header_and_caps.m!"
+            strings "$TMP_OBJ"
+            exit 1
+        fi
+    fi
     if [[ "$(basename "$pos_file")" == "test_valid_effect_system.m" ]]; then
         EFF_OUT=$(clang-23 -std=gnu23 -fblocks -Xclang -load -Xclang "$PLUGIN_PATH" -Xclang -add-plugin -Xclang veriobjc-check -Xclang -plugin-arg-veriobjc-check -Xclang --effects-report -I"$REPO_ROOT/rt/include" -fsyntax-only "$pos_file" 2>&1)
         if ! echo "$EFF_OUT" | grep -q "Function: compute_checksum | Survivors: 0 (effect-free)"; then
@@ -229,6 +236,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Unchecked vresult access"
     elif [[ "$base_name" == test_banned_two_stack_arrays* ]]; then
         EXPECTED_MSG="Second live vstack_array"
+    elif [[ "$base_name" == test_banned_vvector_macro_overflow8* ]]; then
+        EXPECTED_MSG="vvector push exceeds static capacity 8 on 'vec8'"
     elif [[ "$base_name" == test_banned_vvector_overflow* ]]; then
         EXPECTED_MSG="vvector push exceeds static capacity"
     elif [[ "$base_name" == test_banned_vvector_unsealed_arg* ]]; then

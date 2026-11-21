@@ -6,21 +6,53 @@ extern "C" {
 #endif
 
 // ---------------------------------------------------------------------------
-// <vstd/vector.h> — Fixed-Capacity Inplace Containers (vvector<T, N> / VVector<T>)
+// <vstd/vector.h> — Fixed-Capacity Inplace Containers (VVector_decl / VVector)
 // Layer: vstd (depends on: rt)
 //
 // Invariants:
 //   1. Elements live inline inside the container footprint (zero heap allocation).
 //   2. Pushing beyond capacity is rejected at compile time by VeriObjCPlugin
-//      and returns false at runtime.
+//      (via AST inspection of annotate("veriobjc_vvector")) and returns false at runtime.
 //   3. Both vvector_push and vvector_push_inplace construct elements directly
 //      in the destination slot without compound-literal temporaries or memcpy.
-//   4. Task 3.3c (VG-005 / VG-006): vvector<T, N> lowers both flat value types
-//      and @sealed object pointers with return-by-value support, and flat
-//      @final @sealed VVector<T> supports stack value allocation and by-value
-//      return. The deprecated internal __vvector_storage_def bridge has been
-//      deleted so <vstd/vector.h> exposes a single unified container surface.
+//   4. Pure C11/C23/ObjC/C++ AST-checked macro surface (zero source-text rewriting):
+//      - 2-arg VVector_decl(ElemIdent, N) + VVector(ElemIdent, N) for single-token types
+//      - 3-arg VVector_decl(TypeName, ElemType, N) for arbitrary/pointer types & capacities N
+//      - Constrained vgeneric @interface VVector<T : VVectorItem *> for ObjC pointer views
 // ---------------------------------------------------------------------------
+
+#ifdef __cplusplus
+#define __VERIOBJC_VVEC_STATIC_ASSERT(cond, msg) static_assert((cond), msg)
+#else
+#define __VERIOBJC_VVEC_STATIC_ASSERT(cond, msg) _Static_assert((cond), msg)
+#endif
+
+#define __VERIOBJC_VVEC_TAG(ElemIdent, Cap) \
+    VERIOBJC_CONCAT(VERIOBJC_CONCAT(__veriobjc_vvec_, ElemIdent), VERIOBJC_CONCAT(_, Cap))
+
+#define __VERIOBJC_VVEC_DECL_2(ElemIdent, Cap) \
+    struct __attribute__((annotate("veriobjc_vvector"))) __VERIOBJC_VVEC_TAG(ElemIdent, Cap) { \
+        __VERIOBJC_VVEC_STATIC_ASSERT((Cap) > 0, "VVector capacity N must be greater than zero"); \
+        uint32_t count; \
+        uint32_t cap; \
+        ElemIdent buf[Cap]; \
+    }
+
+#define __VERIOBJC_VVEC_DECL_3(TypeName, ElemType, Cap) \
+    typedef struct __attribute__((annotate("veriobjc_vvector"))) TypeName { \
+        __VERIOBJC_VVEC_STATIC_ASSERT((Cap) > 0, "VVector capacity N must be greater than zero"); \
+        uint32_t count; \
+        uint32_t cap; \
+        ElemType buf[Cap]; \
+    } TypeName
+
+#define __VERIOBJC_VVEC_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+
+#define VVector_decl(...) \
+    __VERIOBJC_VVEC_GET_MACRO(__VA_ARGS__, __VERIOBJC_VVEC_DECL_3, __VERIOBJC_VVEC_DECL_2)(__VA_ARGS__)
+
+#define VVector(ElemIdent, Cap) \
+    struct __VERIOBJC_VVEC_TAG(ElemIdent, Cap)
 
 #define vinterface_by_value(InterfaceName) \
     struct __attribute__((annotate("objc_interface_by_value:" #InterfaceName))) { \
@@ -113,13 +145,6 @@ static inline uint32_t __vvector_u32_or_zero(const void *vec_obj, const uint32_t
 
 #ifdef __cplusplus
 }
-
-template <typename ElemType, uint32_t Cap>
-struct __attribute__((annotate("objc_flat"))) vvector {
-    uint32_t count;
-    uint32_t cap;
-    ElemType buf[Cap];
-};
 #endif
 
 #ifdef __OBJC__
