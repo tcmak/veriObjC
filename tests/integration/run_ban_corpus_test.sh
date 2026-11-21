@@ -83,6 +83,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_view_escapes_root.m)
             EXPECTED_DIAG="Escaping data-stack reference"
             ;;
+        valid_objc_escape_via_out_param.m)
+            EXPECTED_DIAG="Escaping data-stack reference"
+            ;;
         valid_objc_unchecked_vresult.m)
             EXPECTED_DIAG="Unchecked vresult access"
             ;;

@@ -33,11 +33,11 @@ Two artifacts, both CI gates:
 
 | Banned construct | Valid ObjC/C? | Diagnostic (key phrase) | VeriObjC replacement | Test |
 | :--- | :--- | :--- | :--- | :--- |
-| Escaping data-stack reference | Yes (raw pointers) | "reference rooted at ... does not outlive the destination" | Pool handles; `vweak` | `test_banned_escaping_stack_ref.m` ✓ |
+| Escaping data-stack reference (outer vars, globals, struct fields, `*out_param`, `&inner[0]`, helper passthrough) | Yes (raw pointers) | "Escaping data-stack reference" | Pool handles; `vweak` | `test_banned_escaping_stack_ref.m`, `test_banned_escape_*.m`, `valid_objc_escape_via_out_param.m` ✓ |
 | Escaping function block | Yes | "Banned escaping function block" | Non-escaping blocks only | `test_banned_escaping_block.m` ✓ |
 | Non-flat channel payload | Yes | "Banned non-flat channel payload" | Flat values; crossing = `memcpy` | `test_banned_nonflat_channel.m` ✓ |
 | General heap on constrained paths | Yes (`malloc`) | "`@alloc` not permitted in `@nolatency` context" | Data stacks / `vpool` | `test_banned_heap_nolatency.m` ✓ |
-| Double free / use-after-move | — | Linear ownership violation | `move`/`consumed` tracking | `test_banned_double_free.m` ✓ |
+| Double free / use-after-move (including aliases & loop back-edges) | — | "Use of consumed linear variable" | `move`/`consumed` CFG lattice tracking | `test_banned_double_free.m`, `test_banned_use_after_move*.m` ✓ |
 | Unannotated `extern fn` called from `@nolatency` | Yes | "defaults to `@cold`" | Declared effects on `extern fn` | `test_cold_ffi_call.m` ✓ |
 | Data-stack reference / pool slot across FFI | Yes | "Banned cross-boundary ownership" | Opaque `vpool` handles | `test_ffi_stack_ref_export.m` / `test_banned_ffi_nonflat_export.m` ✓ |
 | Allocator mixing (foreign `free`, VeriObjC recycling of foreign memory) | Yes | "Banned allocator mixing" | Each allocator's products stay on its side | `test_banned_alloc_mixing.m` ✓ |
@@ -78,6 +78,7 @@ Two artifacts, both CI gates:
 | :--- | :--- | :--- | :--- |
 | Width-mismatched `zip` | "Stream width mismatch" | Compile-time equal-N check | `test_banned_stream_width_mismatch.m` ✓ |
 | Context exceeding `ContextCap` | "Context cap exceeded — compile error" | Pre-banked BRAM arenas (`vstream_kv_arena_def`) | `test_banned_context_overflow.m` / `test_banned_kv_arena_overflow.m` ✓ |
+| Direct or transitive runtime multiplication/division in `objc_hw_kernel` | "ternary datapaths must use 0 DSPs" | Shift/CMUX/popcount arithmetic (`<vstd/ternary.h>`) | `test_banned_zero_dsp_helper_mul.m` ✓ |
 
 ---
 

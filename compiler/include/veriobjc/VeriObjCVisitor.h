@@ -71,12 +71,28 @@ private:
         clang::SourceLocation Loc;
     };
 
+    struct DspOpSite {
+        std::string OpStr;
+        unsigned Line = 0;
+        clang::SourceLocation Loc;
+    };
+
+    struct HwKernelRecord {
+        const clang::Decl *KernelDecl = nullptr;
+        std::string KernelName;
+        clang::SourceLocation Loc;
+    };
+
     clang::ASTContext *Context;
     VeriObjCPluginOptions Opts;
     llvm::StringMap<clang::FunctionDecl *> DirectMethodDecls;
     std::vector<clang::FunctionDecl *> SynthesizedDefs;
     llvm::DenseMap<const clang::FunctionDecl *, std::vector<ErrFromReq>> DirectRaisesFrom;
     llvm::DenseMap<const clang::FunctionDecl *, llvm::SmallVector<std::pair<const clang::FunctionDecl *, clang::SourceLocation>, 4>> CallEdges;
+    llvm::DenseMap<const clang::Decl *, std::vector<DspOpSite>> DirectDspOps;
+    llvm::DenseMap<const clang::Decl *, llvm::SmallVector<std::pair<const clang::Decl *, clang::SourceLocation>, 4>> DspCallEdges;
+    std::vector<HwKernelRecord> HwKernels;
+    llvm::DenseMap<const clang::FunctionDecl *, llvm::SmallVector<unsigned, 4>> ForwardedParamSummaryCache;
     llvm::DenseMap<const clang::VarDecl *, clang::FunctionDecl *> MonomorphizedBlocks;
     llvm::DenseMap<const clang::VarDecl *, llvm::SmallVector<clang::VarDecl *, 4>> BlockCapturedVars;
     llvm::StringMap<clang::FunctionDecl *> DedupBlockDecls;
@@ -195,8 +211,32 @@ private:
         reportError(Loc, "VeriObjC Violation: Banned escaping function block: Escaping function block is banned. Function blocks must be non-escaping and monomorphized at compile time.");
     }
 
-    void reportConsumedVar(clang::SourceLocation Loc, llvm::StringRef VarName) {
-        reportError(Loc, "VeriObjC Violation: Use of consumed linear variable '%0' after move or free.") << VarName;
+    void reportConsumedVar(
+        clang::SourceLocation Loc,
+        llvm::StringRef VarName,
+        llvm::StringRef RootName,
+        llvm::StringRef StateName,
+        llvm::StringRef FnName
+    ) {
+        unsigned Line = Context->getSourceManager().getSpellingLineNumber(Loc);
+        reportError(
+            Loc,
+            "VeriObjC Violation: Use of consumed linear variable '%0' (root '%1', state '%2') in function '%3' at line %4 after move or free."
+        ) << VarName << RootName << StateName << FnName << Line;
+    }
+
+    void reportStackEscape(
+        clang::SourceLocation Loc,
+        llvm::StringRef RootName,
+        unsigned RootDepth,
+        llvm::StringRef SinkDesc,
+        llvm::StringRef FnName
+    ) {
+        unsigned Line = Context->getSourceManager().getSpellingLineNumber(Loc);
+        reportError(
+            Loc,
+            "VeriObjC Violation: Escaping data-stack reference '%0' (rooted at scope depth %1) escapes to %2 in function '%3' at line %4."
+        ) << RootName << RootDepth << SinkDesc << FnName << Line;
     }
 
     // -----------------------------------------------------------------------
@@ -261,38 +301,16 @@ private:
     // -----------------------------------------------------------------------
     // CfgDataflowChecks.cpp
     // -----------------------------------------------------------------------
-    static const clang::VarDecl *extractMovedVarFromComma(const clang::BinaryOperator *BO);
-    bool handleLinearCallExpr(
-        const clang::CallExpr *CE,
-        llvm::DenseSet<const clang::VarDecl *> &MovedVars,
-        llvm::DenseSet<const clang::VarDecl *> &FreedVars
-    );
-    void analyzeLinearOwnership(
-        const clang::Stmt *S,
-        llvm::DenseSet<const clang::VarDecl *> &MovedVars,
-        llvm::DenseSet<const clang::VarDecl *> &FreedVars
-    );
     static bool isStackAllocExpr(const clang::Expr *E);
-    void recordDeclScopeDepth(
-        const clang::DeclStmt *DS,
-        unsigned CurrentDepth,
-        llvm::DenseMap<const clang::VarDecl *, unsigned> &VarDeclDepth,
-        llvm::DenseMap<const clang::VarDecl *, unsigned> &StackRootDepth
+    bool canTypeCarryStackReference(clang::QualType T) const;
+    llvm::SmallVector<unsigned, 4> getForwardedParamIndices(
+        const clang::FunctionDecl *FD,
+        llvm::DenseSet<const clang::FunctionDecl *> &Visiting
     );
-    void checkAssignScopeEscape(
-        const clang::BinaryOperator *BO,
-        unsigned CurrentDepth,
-        const llvm::DenseMap<const clang::VarDecl *, unsigned> &VarDeclDepth,
-        const llvm::DenseMap<const clang::VarDecl *, unsigned> &StackRootDepth
-    );
-    void checkFFIStackArgEscape(const clang::CallExpr *CE, const llvm::DenseMap<const clang::VarDecl *, unsigned> &StackRootDepth);
-    void analyzeScopeRootSafety(
-        const clang::Stmt *S,
-        unsigned CurrentDepth,
-        llvm::DenseMap<const clang::VarDecl *, unsigned> &VarDeclDepth,
-        llvm::DenseMap<const clang::VarDecl *, unsigned> &StackRootDepth
-    );
-    void verifyHwKernelNoMultiply(const clang::Stmt *S, llvm::StringRef KernelName);
+    void analyzeFunctionCFGDataflow(clang::Stmt *Body, clang::DeclContext *DC);
+    void recordDspGraphForBody(const clang::Decl *OwnerDecl, const clang::Stmt *Body);
+    void registerHwKernelRoot(const clang::Decl *KernelDecl, llvm::StringRef KernelName, clang::SourceLocation Loc);
+    void verifyAllHwKernelsZeroDsp();
     void collectErrorReturnGraph(const clang::Stmt *S, const clang::FunctionDecl *CallerFD);
     void verifyMultiFrameErrorReturns();
 

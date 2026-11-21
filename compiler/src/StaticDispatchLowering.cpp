@@ -430,13 +430,7 @@ void VeriObjCVisitor::rewriteStmtTree(Stmt *S, DeclContext *DC) {
 }
 
 bool VeriObjCVisitor::analyzeAndRewriteBody(Stmt *Body, DeclContext *DC) {
-    llvm::DenseSet<const VarDecl *> MovedVars;
-    llvm::DenseSet<const VarDecl *> FreedVars;
-    analyzeLinearOwnership(Body, MovedVars, FreedVars);
-
-    llvm::DenseMap<const VarDecl *, unsigned> VarDeclDepth;
-    llvm::DenseMap<const VarDecl *, unsigned> StackRootDepth;
-    analyzeScopeRootSafety(Body, 0, VarDeclDepth, StackRootDepth);
+    analyzeFunctionCFGDataflow(Body, DC);
 
     llvm::StringRef FnName;
     bool IsNoLatencyFn = false;
@@ -495,10 +489,11 @@ void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
         if (!FD->hasBody()) return;
         auditFunctionEffectsAndReport(FD);
         collectErrorReturnGraph(FD->getBody(), FD->getCanonicalDecl());
-        if (!analyzeAndRewriteBody(FD->getBody(), FD)) return;
+        recordDspGraphForBody(FD, FD->getBody());
         if (hasVeriObjCAnnotation(FD, "objc_hw_kernel")) {
-            verifyHwKernelNoMultiply(FD->getBody(), FD->getName());
+            registerHwKernelRoot(FD, FD->getName(), FD->getLocation());
         }
+        if (!analyzeAndRewriteBody(FD->getBody(), FD)) return;
         return;
     }
 
@@ -509,20 +504,21 @@ void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
     for (ObjCMethodDecl *MD : ImplD->instance_methods()) {
         if (!MD->hasBody()) continue;
         Stmt *OrigBody = MD->getBody();
-        if (!analyzeAndRewriteBody(OrigBody, MD)) continue;
-
+        recordDspGraphForBody(MD, OrigBody);
         const ObjCMethodDecl *IfaceMD = ID->lookupMethod(MD->getSelector(), MD->isInstanceMethod());
         if (hasVeriObjCAnnotation(MD, "objc_hw_kernel") ||
             (IfaceMD && hasVeriObjCAnnotation(IfaceMD, "objc_hw_kernel"))) {
             std::string KernelName = (ID->getName() + "::" + MD->getSelector().getAsString()).str();
-            verifyHwKernelNoMultiply(OrigBody, KernelName);
+            registerHwKernelRoot(MD, KernelName, MD->getLocation());
         }
+        if (!analyzeAndRewriteBody(OrigBody, MD)) continue;
         replaceMethodWithDirectForwarding(ID, MD, OrigBody);
     }
 }
 
 void VeriObjCVisitor::finalizeTranslationUnitAudits() {
     verifyMultiFrameErrorReturns();
+    verifyAllHwKernelsZeroDsp();
     uint32_t UnusedWCET = 0;
     verifyTaskDAGAndComputeWCET(SourceLocation(), UnusedWCET);
     if (!Context->getDiagnostics().hasErrorOccurred() && Opts.EmitMonoReport) {

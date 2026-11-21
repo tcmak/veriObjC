@@ -8,7 +8,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Phases 0–3 Implemented; Phases 4–5 Partial / In Progress (Task 4.4 SMT solver is scaffolding; transitive helper zero-multiplication check & Task 5.5 mixed-size sealed composition open)
+* **Overall Status:** Phases 0–3 Implemented (including `clang::CFG` move/escape lattice & transitive zero-DSP call-graph check); Phases 4–5 Partial / In Progress (Task 4.4 SMT solver is scaffolding; Task 5.5 mixed-size sealed composition open)
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`clang-23`)
 * **Test Framework:** CppUTest (`CPPUTEST_ROOT`)
 * **Build System:** CMake + Make / Ninja
@@ -130,12 +130,11 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Enforces sealed class inheritance (`test_banned_unsealed_inheritance.m`), final class non-subclassability (`test_banned_final_inheritance.m`), and sealed protocol conformance (`test_banned_unsealed_protocol.m`).
 
 ### 2.4 Linear Ownership & Data-Stack State Tracker
-- [x] **Task 2.4.1: Move Semantics & Consumed State Tracker [TDD Cycle 12]**
-  - Linear ownership graph (`Unallocated -> Active -> Consumed/Dead`) via `veriobjc_move()` / `__veriobjc_mark_moved` and `__attribute__((objc_consumed))` parameter tracking.
-  - Double-free (`veriobjc_pool_free` / `veriobjc_gen_pool_free`) and use-after-move compile rejection (`test_banned_double_free.m`, `test_banned_use_after_move.m`).
-- [x] **Task 2.4.2: Reference Root Safety [TDD Cycle 12]**
-  - Statically proves every data-stack reference (`veriobjc_stack_alloc` / `veriobjc_alloc_init`) is bounded by its declaring lexical scope depth (`analyzeScopeRootSafety`).
-  - Rejects escaping data-stack references assigned to outer-scope destinations (`test_banned_escaping_stack_ref.m`).
+- [x] **Task 2.4.1: Move Semantics & Consumed State Tracker [TDD Cycle 12 / Task C2.2]**
+  - Path-sensitive forward monotone dataflow worklist over `clang::CFG` (`compiler/src/CfgDataflowChecks.cpp`) tracking `Unreached -> Live/Moved -> MaybeMoved` across `if`/`else` join blocks, local pointer aliases, and loop back-edges via `veriobjc_move()` / `__veriobjc_mark_moved` and `__attribute__((objc_consumed))`.
+  - Double-free (`veriobjc_pool_free` / `veriobjc_gen_pool_free`), alias use-after-move, and loop back-edge use-after-move rejected at compile time while branch-symmetric moves are accepted (`test_banned_double_free.m`, `test_banned_use_after_move.m`, `test_banned_use_after_move_alias.m`, `test_banned_use_after_move_loop_backedge.m`, `test_valid_branch_symmetric_move.m`).
+- [x] **Task 2.4.2: Reference Root Safety [TDD Cycle 12 / Task C2.2]**
+  - `clang::CFG` stack-scope provenance lattice (`StackScoped(depth)`) + interprocedural pointer-forwarding summaries proving data-stack allocations (`veriobjc_stack_alloc` / `veriobjc_alloc_init`) and views (`vstring_view`, `vspan`) never escape via outer variables, globals, struct fields, out-parameters, subobject addresses (`&inner[0]`), return values, or identity/forwarding helper functions (`test_banned_escaping_stack_ref.m`, `test_banned_escape_*.m`, `valid_objc_escape_via_out_param.m`).
 - [x] **Task 2.4.3: Flat-Value Channel Enforcement [TDD Cycle 12]**
   - Registered `__attribute__((objc_flat))` Sema attribute and statically verifies payload types of `veriobjc_channel_send` and `objc_flat` structs/typedefs contain zero pointer/reference fields at any nesting depth (`test_banned_nonflat_channel.m`, `test_valid_linear_and_channel.m`, `examples/linear_channel_router.m`).
 
@@ -173,8 +172,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Lower `y += (w == 1 ? x : w == -1 ? -x : 0)` (`veriobjc_ternary_select`) to a MUX ladder (`veriobjc_cmux`) — never a branch — with accumulation as popcount reduction (`veriobjc_ternary_popcount_reduce`: `sum = popcount(w=+1 lanes) − popcount(w=−1 lanes)`).
   - Lower `reduceTree` (`veriobjc_ternary_dot_512`) to `log2(N)` registered stages (`vstream_latency_contract`); pipeline depth verified as a compile-time latency contract (`ReduceStages: 9`).
   - Positive/negative tests: `test_valid_ternary_dot.m`, `examples/ternary_glu_block.m`.
-- [x] **Task 2.6.3: `objc_hw_kernel` Zero-Multiplication AST Gate [TDD Cycle 20]** *(direct-body `*` check only; RTL resource estimation is outside `veriObjC` scope)*
-  - Statically verify `vstream_latency_contract` (`log2(N)` reduce stages) and `vstream_check_context` bounds on `objc_hw_kernel` functions/methods; **fail the build on direct runtime multiplication (`*` / `*=`) in the kernel body** *(transitive helper call-graph zero-multiplication checking remains open; hardware LUT/FF/BRAM/DSP resource reporting is not owned by `veriObjC`)*.
+- [x] **Task 2.6.3: `objc_hw_kernel` Zero-Multiplication & Transitive Call-Graph Gate [TDD Cycle 20 / Task C2.2]** *(RTL resource estimation is outside `veriObjC` scope)*
+  - Statically verify `vstream_latency_contract` (`log2(N)` reduce stages) and `vstream_check_context` bounds on `objc_hw_kernel` functions/methods; **fail the build on both direct and transitive helper runtime multiplication/division (`*`, `*=`, `/`, `/=`, `%`, `%=`) across the call graph** (`test_banned_zero_dsp_helper_mul.m`; hardware LUT/FF/BRAM/DSP resource reporting is not owned by `veriObjC`).
 
 ### 2.7 Ban List Compliance Suite
 *(Mapped to: `docs/veriobjc-ban-list.md` — Centralized Ban Registry & Valid-ObjC Rejection Corpus)*
@@ -292,8 +291,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified disassembly and symbol tables contain **0 calls to `objc_msgSend` / `objc_msg_lookup`** and **0 undefined external symbols** in freestanding kernel mode.
 - [x] **Task 5.2: Round-Trip Snapshot Persistence**
   - Replay order book snapshot (`examples/order_book_snapshot.c` and `tests/unit_rt/TestTapeAndRelPtr.cpp`) through `veriobjc_to_bytes` / `veriobjc_from_bytes` with self-relative link verification and fuzz corruption check (pinned as the standalone `VOBJ` v1 container in Task 5.6b).
-- [x] **Task 5.3: Ternary Block Elaboration & Direct-Body Zero-Multiplication Gate** *(direct-body `*` check only; transitive helper check open)*
-  - Compile `examples/ternary_glu_block.m` with `veriobjc-check`; assert the plugin's `objc_hw_kernel` AST check rejects direct `*`/`*=` operators, `ternary_dot<512>` verifies `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) declares `@latency(cycles = 10)` *(transitive helper call-graph `*`/`/` checking is not yet enforced)*.
+- [x] **Task 5.3: Ternary Block Elaboration & Transitive Zero-Multiplication Gate**
+  - Compile `examples/ternary_glu_block.m` and `examples/cfg_branch_move_router.m` with `veriobjc-check`; assert the plugin's `objc_hw_kernel` call-graph check rejects both direct and transitive helper `*`/`/` operators (`test_banned_zero_dsp_helper_mul.m`), `ternary_dot<512>` verifies `log2(512) = 9` reduce stages (`@latency(cycles = 9)` for `ternary_dot<512>`), and the full `TernaryGLUBlock` (1-cycle register shift + 9-cycle parallel `ternary_dot<512>` + 0-cycle combinational `glu_gate` mux ladder) declares `@latency(cycles = 10)`.
   - Weight provenance: packed ternary weight image loaded and verified via `veriobjc_from_bytes` before any kernel runs (content-addressed artifact from the hosted training tier).
 - ~~**Task 5.4: Vendor Synthesis Validation & RTL Equivalence (DROPPED from `veriObjC` in Task B2)**~~
   - *Boundary cut: Duplicate C/RTL co-simulation interpreters and hardware synthesis reporting are permanently dropped from standalone `veriObjC`. `<vstd/ternary.h>` retains `veriobjc_ternary_dot_512` strictly as a pure-CPU round-half-up software fallback.*

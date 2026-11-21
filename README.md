@@ -79,7 +79,7 @@ __attribute__((objc_sealed))
 @end
 ```
 
-Full examples: [`examples/`](examples/) — fixed-point audio processing, the market-data parser above, and a matmul-free ternary-inference block (`objc_hw_kernel` direct-body `*` check enforced; transitive helper zero-multiplication analysis pending).
+Full examples: [`examples/`](examples/) — fixed-point audio processing, the market-data parser above, and a matmul-free ternary-inference block (`objc_hw_kernel` direct and transitive call-graph zero-multiplication check enforced).
 
 ---
 
@@ -111,10 +111,10 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 | Area | State |
 | :--- | :--- |
-| **Phases 0–2** (toolchain, micro-runtime, Clang plugin: bans, direct-receiver devirtualization, lowering, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` AST elaboration, ban corpus) | ✅ Implemented — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov` *(CFG-based escape/move & transitive zero-multiplication helper checks tracked for hardening)* |
+| **Phases 0–2** (toolchain, micro-runtime, Clang plugin: bans, `clang::CFG` move/escape dataflow, transitive zero-DSP call-graph check, lowering, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` AST elaboration, ban corpus) | ✅ Implemented — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov` |
 | **Phase 3** (`vstd/`, `sys0/`, `hw/`, `<vstd/contracts.h>`, `<vstd/simd.h>`, `<vstd/io.h>`, header-closure & minimal-binary cohesion gate) | ✅ Implemented — verified by `unit_rt_tests`, `plugin_tests`, `ban_corpus_tests`, and `vstd_cohesion_tests` |
 | **Phase 4** (cycle benchmark harness, survivor report diff engine, latency budget gate, contract verification) | 🟡 Partial / Scaffolding — bench harness, survivor diff, and latency gate pass unit tests; **Task 4.4 (SMACK/Z3 solver)** is **scaffolding only** (`--smt-report` emits `UNIMPLEMENTED_STUB` with no external solver invoked; `rt_contract_eval_endpoints_stub` checks affine endpoints only) |
-| **Phase 5** (examples smoke suite, `VOBJ` snapshot persistence, pure-CPU ternary fallback, ternary zero-multiplication check, sealed hierarchy composition) | 🟡 Partial / In Progress — Tasks 5.1–5.2, `VOBJ` v1 golden corpus (`fixtures/vobj_v1/`), and pure-CPU round-half-up ternary fallback (`<vstd/ternary.h>`) pass; **Task 5.3 (`objc_hw_kernel` zero-multiplication check)** inspects direct kernel-body `*` only (**transitive helper calls not yet checked**); **Task 5.4** (dropped — RTL synthesis and co-sim are out of scope for standalone `veriObjC`) and **Task 5.5** (mixed-size `@sealed` upcast dispatch + `@scoped` reset composition) is **⬜ Incomplete** |
+| **Phase 5** (examples smoke suite, `VOBJ` snapshot persistence, pure-CPU ternary fallback, transitive ternary zero-multiplication check, sealed hierarchy composition) | 🟡 Partial / In Progress — Tasks 5.1–5.3, `VOBJ` v1 golden corpus (`fixtures/vobj_v1/`), and pure-CPU round-half-up ternary fallback (`<vstd/ternary.h>`) pass; **Task 5.4** (dropped — RTL synthesis and co-sim are out of scope for standalone `veriObjC`); **Task 5.5** (mixed-size `@sealed` upcast dispatch + `@scoped` reset composition) is **⬜ Incomplete** |
 | **Phase 6** (`vpm` & manifest) | ⬜ Planned |
 | **Toolchain** | Clang / LLVM 23.1.5, CppUTest, CMake |
 | **Production usage** | None. This is a research bet that the *impossible list* is worth the closed world. |
