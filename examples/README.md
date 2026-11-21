@@ -36,7 +36,7 @@ This directory contains two complementary sets of programs:
 | [`vio_loopback_ring.m`](./vio_loopback_ring.m) | **Task 3.11 (`<vstd/io.h>`):** Non-blocking DMA descriptor ring (`vdma_ring_def`) and in-process loopback roundtrip (`vio_loopback_roundtrip`). | `clang-23 -I./rt/include -I./vstd/include -c examples/vio_loopback_ring.m` — `0` blocking POSIX I/O calls, ring capacity verified. |
 | [`vexecution_irq_pipeline.m`](./vexecution_irq_pipeline.m) | **Task 3.12 (`<vstd/execution.h>`):** P2300-style stack sender pipeline (`vsender_just_i32`, `vsender_then_i32`) and interrupt-woken `vasync` future (`vasync_task_def`, `vasync_irq_wake`). | `clang-23 -I./rt/include -I./vstd/include -c examples/vexecution_irq_pipeline.m` — `0` polling rings, static DAG WCET verified. |
 | [`vsimd_packet_checksum.m`](./vsimd_packet_checksum.m) | **Task 3.13 (`<vstd/simd.h>`):** Hardware-aware portable SIMD vectorization (`vsimd_i32x4`) on `@nolatency` paths without raw vendor intrinsics. | `clang-23 -I./rt/include -I./vstd/include -c examples/vsimd_packet_checksum.m` — byte-exact match with scalar reference. |
-| [`vcontracts_bounds_proof.m`](./vcontracts_bounds_proof.m) | **Task 3.14 (`<vstd/contracts.h>`):** Pure (`@pure`) contract predicates (`vcontract_in_range_i64`) and `@pre`/`@post` SMT boundary extraction. | `clang-23 -I./rt/include -I./vstd/include -c examples/vcontracts_bounds_proof.m` — `0` surviving effects (`--effects-report`). |
+| [`vcontracts_bounds_proof.m`](./vcontracts_bounds_proof.m) | **Tasks 3.14 & 4.4 (`<vstd/contracts.h>` + Z3 `QF_BV` Prover):** Pure (`@pure`) contract predicates (`vcontract_in_range_i64`), 64-bit price clamping (`clamp_limit_price`), and 32-bit unsigned DMA cacheline rounding (`round_up_dma_frame_64`) formally proven `UNSAT_PROVEN` by real Z3. | `clang-23 ... --smt-verify --smt-report -I./rt/include -I./vstd/include -fsyntax-only examples/vcontracts_bounds_proof.m` — `Status: UNSAT_PROVEN` (`0` surviving effects). |
 | [`hello_world.m`](./hello_world.m) | **Task 3.15 Hosted Minimal-Binary Proof:** Zero `<vstd/*.h>` imports; `extern fn printf` declared `@io @cold`; links against `rt/` alone. | `clang-23 -I./rt/include -c examples/hello_world.m` — `0` `vstd` headers included (`clang -H`). |
 | [`hello_uart.m`](./hello_uart.m) | **Task 3.15 Bare-Metal Minimal-Binary Proof (`<vstd/io.h>`, `<sys0/boot.h>`, `<hw/loopback.h>`):** Imports only the I/O + boot + hardware loopback closure with zero container or math headers linked. | `clang-23 -I./rt/include -I./vstd/include -I./sys0/include -I./hw/include -c examples/hello_uart.m` — minimal closure verified. |
 | [`cfg_branch_move_router.m`](./cfg_branch_move_router.m) | **Task C2.2 (`clang::CFG` Move/Escape Lattice & Transitive Zero-DSP Call-Graph Check):** Branch-symmetric `veriobjc_move` across `if`/`else` without post-join use, scoped `&scratch[0]` subobject addressing within lifetime, and multiplier-free `objc_hw_kernel` helper call chains. | `clang-23 -I./rt/include -c examples/cfg_branch_move_router.m` — `0` heap allocations, `0` multipliers across helper call graph. |
@@ -91,6 +91,7 @@ Every file in `examples/banned/` is **100% valid, idiomatic stock Objective-C** 
 | [`valid_objc_escape_via_out_param.m`](./banned/valid_objc_escape_via_out_param.m) | Task C2.2: Storing a `@scoped` data-stack allocation through an out-parameter pointer (`*out_slot = scratch`) | `"Escaping data-stack reference"` | Copy flat values out or allocate long-lived slots in an outer `vpool` |
 | [`valid_objc_unsealed_inheritance.m`](./banned/valid_objc_unsealed_inheritance.m) | Task C2.3: Open-world subclassing of a base `@interface` without `__attribute__((objc_sealed))` | `"Polymorphic class"` | Mark polymorphic base and intermediate classes `__attribute__((objc_sealed))` and leaf classes `__attribute__((objc_final))` |
 | [`valid_objc_sealed_upcast_escape.m`](./banned/valid_objc_sealed_upcast_escape.m) | Task 5.5: Escaping mixed-size `@sealed` superclass pointers out of an inner `VERIOBJC_SCOPED_STACK` via `vspan_init` | `"Escaping data-stack reference"` | Keep `vspan` slices of `@sealed` arena objects within their lexical `VERIOBJC_SCOPED_STACK` lifetime |
+| [`valid_objc_contract_counterexample.m`](./banned/valid_objc_contract_counterexample.m) | Task 4.4: Off-by-one slot index clamp (`slot_idx == 64`) violating `vcontract_post("result >= 0 && result < 64")` under `--smt-verify` | `"Z3_SAT_COUNTEREXAMPLE"` | Fix the upper guard (`slot_idx >= 64`) so Z3 proves `UNSAT_PROVEN` across all 32-bit inputs |
 
 ---
 
@@ -184,6 +185,26 @@ clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -ffreestanding -nostdlib \
 
 # Confirm 0 undefined external symbols:
 nm build/kernel_dma_batch.o | grep "U " || echo "0 undefined symbols (100% freestanding)"
+```
+
+#### 5. Formally Prove `@pre` / `@post` Contracts with Z3 (`--smt-verify`)
+```bash
+# Prove valid contracts in examples/vcontracts_bounds_proof.m (reports UNSAT_PROVEN):
+clang-23 -std=gnu23 -fblocks \
+         -Xclang -load -Xclang build/libVeriObjCPlugin.so \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report \
+         -I./rt/include -I./vstd/include \
+         -fsyntax-only examples/vcontracts_bounds_proof.m
+
+# Observe Z3 catch the off-by-one bug in valid_objc_contract_counterexample.m with a concrete witness:
+clang-23 -std=gnu23 -fblocks \
+         -Xclang -load -Xclang build/libVeriObjCPlugin.so \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+         -I./rt/include -I./vstd/include \
+         -fsyntax-only examples/banned/valid_objc_contract_counterexample.m
 ```
 
 ---

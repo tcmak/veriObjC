@@ -72,6 +72,7 @@ Two artifacts, both CI gates:
 | Regex state explosion | "Byte budget exceeded (pattern named)" | Manifest table budget | `test_regex_state_explosion.m` ✓ |
 | Non-exhaustive `vmatch` on `vvariant` (including added enum cases) | "Non-exhaustive vmatch on vvariant" | Exhaustive `vmatch` covering all enum tags | `test_banned_nonexhaustive_match.m` / `test_banned_vvariant_added_case.m` ✓ |
 | Monomorphization budget exceeded | "Monomorphization budget exceeded" | Deduplicated `@mono` within package budget or `@erased` | `test_banned_mono_budget.m` ✓ |
+| Violated `@pre` / `@post` contract under Z3 `QF_BV` (`--smt-verify`) | "Z3_SAT_COUNTEREXAMPLE" | Satisfy postcondition across all C bit-width inputs (including overflow boundaries) | `test_banned_smt_z3_counterexample.m`, `valid_objc_contract_counterexample.m` ✓ |
 
 ### D. veriStream
 

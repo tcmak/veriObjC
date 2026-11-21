@@ -10,11 +10,13 @@ VeriObjC requires:
 * **Clang / LLVM 23** (`clang-23`, `clang++-23`, `llvm-objdump-23`; LLVM CMake package discovered via `find_package(LLVM REQUIRED CONFIG)`, configurable with `-DLLVM_DIR=...`)
 * **CMake 3.25+**
 * **Make**
+* **Z3 ≥ 4.8.12 (64-bit)** (`z3`, discovered via `find_program(Z3_EXECUTABLE NAMES z3)`, configurable via `-DZ3_EXECUTABLE=/path/to/z3` or bypassed at configure time with `-DVERIOBJC_REQUIRE_Z3=OFF`; host/compile-time tool only — zero runtime dependency in compiled targets)
 * **CppUTest** (configurable via `-DCPPUTEST_ROOT=...` or `CPPUTEST_ROOT`, defaulting to `../cpputest` or `$HOME/.veriobjc/cpputest`; supports both `cpputest_build/` and `build/` layouts)
 
 Verify your environment:
 ```bash
 clang-23 --version
+z3 --version
 cmake --version
 ```
 
@@ -102,6 +104,47 @@ To compile kernel or bare-metal modules without linking against standard OS libr
 clang-23 -O2 -ffreestanding -nostdlib \
          -I./rt/include \
          -c examples/kernel_dma_batch.c -o build/kernel_dma_batch.o
+```
+
+### 3. Formal SMT Contract Verification with Z3 (`--smt-verify` & `--smt-report`)
+Functions annotated with `vcontract_pre(...)` / `vcontract_post(...)` (`<vstd/contracts.h>`) or `veriobjc_pre(...)` / `veriobjc_post(...)` can be formally discharged at compile time over exact C two's-complement bit-vector semantics (`QF_BV`) via Z3:
+
+| Plugin CLI Flag | Purpose |
+| :--- | :--- |
+| `--smt-verify` | Fail compilation closed on any violated `@post` (`Z3_SAT_COUNTEREXAMPLE`), timeout/inconclusive proof (`Z3_UNKNOWN_TIMEOUT`), or missing/outdated solver (`Z3_SOLVER_UNAVAILABLE`). |
+| `--smt-report` | Print per-function Z3 discharge status (`Solver: Z3 version ... | Status: UNSAT_PROVEN \| SAT_COUNTEREXAMPLE \| UNKNOWN_TIMEOUT`). |
+| `--smt-timeout-ms=<ms>` | Per-function Z3 timeout budget in milliseconds (default: `2000`; fails closed with `Z3_UNKNOWN_TIMEOUT` if exceeded). |
+| `--z3-path=<path>` | Override the `z3` executable path (must report `Z3 version >= 4.8.12`; fails closed with `Z3_SOLVER_UNAVAILABLE` otherwise). |
+
+**Proven contract (`UNSAT_PROVEN`):**
+```bash
+clang-23 -std=gnu23 -fblocks \
+         -Xclang -load -Xclang build/libVeriObjCPlugin.so \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-report \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-timeout-ms=2000 \
+         -I./rt/include -I./vstd/include \
+         -fsyntax-only examples/vcontracts_bounds_proof.m
+```
+Output:
+```text
+[VeriObjC --smt-report] Function: clamp_limit_price | Pre: (assert (price >= 1 && price <= 100000)) | Post: (assert (not (result >= 1 && result <= 100000))) | Solver: Z3 version 4.8.12 - 64 bit | Status: UNSAT_PROVEN
+[VeriObjC --smt-report] Function: round_up_dma_frame_64 | Pre: (assert (bytes <= 8192)) | Post: (assert (not ((result & 63) == 0 && result >= bytes && result <= 8192))) | Solver: Z3 version 4.8.12 - 64 bit | Status: UNSAT_PROVEN
+```
+
+**Violated contract (`Z3_SAT_COUNTEREXAMPLE` with concrete witness):**
+```bash
+clang-23 -std=gnu23 -fblocks \
+         -Xclang -load -Xclang build/libVeriObjCPlugin.so \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -Xclang -plugin-arg-veriobjc-check -Xclang --smt-verify \
+         -I./rt/include -I./vstd/include \
+         -fsyntax-only tests/plugin/negative/test_banned_smt_z3_counterexample.m
+```
+Output (32-bit signed overflow caught by `QF_BV` bit-vector reasoning):
+```text
+tests/plugin/negative/test_banned_smt_z3_counterexample.m:10:39: error: VeriObjC Violation: SMT contract counterexample (Z3_SAT_COUNTEREXAMPLE) in function 'unchecked_add_margin_i32' at 10:39: postcondition '@post(result > price)' violated under '@pre(price >= 0 && margin >= 1 && margin <= 100)' with witness { price = 2147483586, margin = 68, result = -2147483642 }.
 ```
 
 ---

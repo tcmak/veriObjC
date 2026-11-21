@@ -17,7 +17,7 @@ This document gets a fresh Linux machine from zero to a state where the VeriObjC
 | **CppUTest** | latest `master` | **Optional** — test framework for the `unit_rt`, `plugin`, and `integration` suites. Not needed to *use* VeriObjC, only to run its tests. Skip with `--no-cpputest`. The `4.0` tag is ~6 years stale; `master` is continuously maintained and is the recommended ref. |
 | **Git** | any | Version control. |
 | **OS** | Linux | The reference development path. Other Unixes: see *Manual steps* — untested, no claims. |
-| SMACK / Z3 | *not yet* | Phase 4 (Task 4.4) dependency. Do not install now; this page will grow a section when that task lands. |
+| **Z3** | **≥ 4.8.12 (64-bit)** | **Host/compile-time formal SMT solver** (`sudo apt-get install z3`) invoked by `--smt-verify` / `--smt-report` (Task 4.4) to discharge `@pre` / `@post` contracts over exact C bit-vectors (`QF_BV`). Z3 is strictly a compile-time host tool — compiled `veriObjC` binaries and `rt/` have **zero** runtime dependency on Z3 or `libz3`. Override path via `-DZ3_EXECUTABLE=/path/to/z3`, or bypass the CMake configure check when building without SMT verification via `-DVERIOBJC_REQUIRE_Z3=OFF`. |
 
 ---
 
@@ -26,10 +26,13 @@ This document gets a fresh Linux machine from zero to a state where the VeriObjC
 ```bash
 git clone <your-repo-url> veriObjC
 cd veriObjC
-bash scripts/install.sh          # prerequisites + Clang 23 + CppUTest
+bash scripts/install.sh          # prerequisites + Clang 23 + Z3 (>= 4.8.12) + CppUTest
 #                                # (add --no-cpputest if you only want to use VeriObjC, not run its tests)
 export CC=clang-23 CXX=clang++-23 CPPUTEST_ROOT="$HOME/.veriobjc/cpputest"
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+# Optional CMake overrides for Z3:
+#   -DZ3_EXECUTABLE=/custom/path/z3    (pin a specific z3 >= 4.8.12 binary)
+#   -DVERIOBJC_REQUIRE_Z3=OFF          (allow configuring without Z3 installed)
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
@@ -63,9 +66,9 @@ command -v sudo >/dev/null 2>&1 && SUDO="sudo"
 [ "$(uname -s)" = "Linux" ] || die "This bootstrap targets Linux (the reference toolchain path)."
 command -v apt-get >/dev/null 2>&1 || die "apt-get not found — see INSTALL.md 'Manual steps' for other distributions."
 
-say "Installing build prerequisites (cmake, make, git, wget)…"
+say "Installing build prerequisites (cmake, make, git, wget, z3)…"
 $SUDO apt-get update -qq
-$SUDO apt-get install -y build-essential cmake git wget
+$SUDO apt-get install -y build-essential cmake git wget z3
 
 if ! command -v "clang-$LLVM_VERSION" >/dev/null 2>&1; then
   say "Installing Clang/LLVM $LLVM_VERSION from apt.llvm.org…"
@@ -96,6 +99,14 @@ say "Verifying toolchain…"
 "clang-$LLVM_VERSION"  --version | head -n1
 "clang++-$LLVM_VERSION" --version | head -n1
 cmake --version | head -n1
+command -v z3 >/dev/null 2>&1 || die "z3 not found on PATH after installation (requires Z3 >= 4.8.12)."
+Z3_VER_LINE="$(z3 --version | head -n1)"
+printf '%s\n' "$Z3_VER_LINE"
+Z3_VER_NUM="$(printf '%s\n' "$Z3_VER_LINE" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)"
+[ -n "$Z3_VER_NUM" ] || die "Could not parse version from '$Z3_VER_LINE' (requires Z3 >= 4.8.12)."
+if ! dpkg --compare-versions "$Z3_VER_NUM" ge "4.8.12"; then
+  die "Installed Z3 version $Z3_VER_NUM is older than required minimum 4.8.12."
+fi
 if [ "$SKIP_CPPUTEST" -eq 0 ]; then
   CPPUTEST_LIB="$(find "$DEPS_DIR/cpputest/cpputest_build" -name 'libCppUTest.a' | head -n1)"
   [ -n "$CPPUTEST_LIB" ] || die "CppUTest static library not found — build failed silently, re-run with verbose output."
@@ -136,6 +147,7 @@ A correct install satisfies all of these (lines marked *skip* don't apply to `--
 
 ```bash
 clang-23 --version                                        # reports 23.x
+z3 --version                                              # reports Z3 version >= 4.8.12 (64 bit)
 test -f "${CPPUTEST_ROOT:-$HOME/.veriobjc/cpputest}/cpputest_build/src/CppUTest/libCppUTest.a"   # skip if --no-cpputest; or wherever your CMake expects it
 cmake --build build && ctest --test-dir build --output-on-failure
 ```
@@ -144,10 +156,12 @@ The CTest gate names (from the plan) that must appear and pass **when CppUTest i
 
 | CTest target | Suite |
 | :--- | :--- |
-| `unit_rt_tests` | Micro-runtime unit tests (CppUTest) |
-| `plugin_tests` | Plugin diagnostic-compliance tests |
+| `unit_rt_tests` | Micro-runtime, `vstd`, `sys0`, and host Z3 bridge unit tests (CppUTest) |
+| `plugin_tests` | Plugin AST/CFG/Z3 diagnostic-compliance tests |
+| `examples_smoke_tests` | End-to-end examples + standalone `@sealed` binaries + Z3 contract proof smoke gate |
 | `ban_corpus_tests` | Dual-direction ban corpus: clean under stock Clang, rejected under the plugin |
-| `examples_smoke_tests` | End-to-end examples: 0 `objc_msgSend` / 0 undefined symbols |
+| `vstd_cohesion_tests` | Header layer table, `-ffreestanding -mno-sse` `rt/` audit, and `--gc-sections` minimal-binary gate |
+| `e2e_sealed_polymorphism_tests` | Standalone `@sealed` base-pointer dispatch & mixed-size `vspan` scope-reset audit (zero `-lobjc`) |
 
 ---
 
@@ -155,8 +169,8 @@ The CTest gate names (from the plan) that must appear and pass **when CppUTest i
 
 The script covers Debian/Ubuntu via `apt.llvm.org`. Elsewhere, install the equivalents yourself and check the version pin:
 
-- **Fedora**: `dnf install clang cmake ninja-build git` — verify `clang --version` reports 23.x; Fedora may ship a different LLVM major. If it is not 23, build the plugin against the distro's LLVM **only if** you accept ABI-mismatch risk, or install LLVM 23 from source.
-- **Arch**: `pacman -S clang cmake ninja git` — Arch usually tracks current LLVM; verify 23.x.
+- **Fedora**: `dnf install clang cmake ninja-build git z3` — verify `clang --version` reports 23.x and `z3 --version` reports ≥ 4.8.12; Fedora may ship a different LLVM major. If it is not 23, build the plugin against the distro's LLVM **only if** you accept ABI-mismatch risk, or install LLVM 23 from source.
+- **Arch**: `pacman -S clang cmake ninja git z3` — Arch usually tracks current LLVM and Z3; verify Clang 23.x and Z3 ≥ 4.8.12.
 - **macOS**: untested, no claims. The plugin builds as a `.dylib` on Apple platforms in principle; the freestanding runtime targets are not meaningful there.
 
 The only hard rule: **the plugin must be built by and against the same Clang major version it loads into.** `clang-23` everywhere.
@@ -173,6 +187,7 @@ The only hard rule: **the plugin must be built by and against the same Clang maj
 | `llvm-23-dev` missing | Script ran on a machine where `llvm.sh` partially failed | `sudo apt-get install llvm-23-dev libclang-cpp-23-dev` |
 | Plugin tests skipped silently | Plugin not registered under `-plugin veriobjc-check` | Check the CMake option enabling plugin tests; see BUILDING.md |
 | `error: unknown attribute` on `objc_sealed` etc. | Compiling without the plugin | Run `clang-23` with `-Xclang -load -Xclang libVeriObjCPlugin.so -add-plugin veriobjc-check` (BUILDING.md documents the wrapper) |
+| CMake fails with `Z3 SMT solver not found` or `requires Z3 >= 4.8.12` | `z3` missing on `PATH` or older than `4.8.12` | Install via `sudo apt-get install z3`, point `-DZ3_EXECUTABLE=/path/to/z3` at a ≥ 4.8.12 binary, or pass `-DVERIOBJC_REQUIRE_Z3=OFF` when configuring without SMT contract checks |
 
 ---
 

@@ -44,18 +44,19 @@ The registry (`docs/veriobjc-ban-list.md`) and the test suite are kept in lockst
 
 ---
 
-## 📊 Report Discipline
+## 📊 Report & SMT Proof Discipline
 
-`--effects-report`, `--branch-report`, and `--mono-report` are CI artifacts, diffed per build:
+`--effects-report`, `--branch-report`, `--mono-report`, and `--smt-report` / `--smt-verify` are CI artifacts:
 
 - A certified hot loop that *gains* an effect, an unproven branch, or an instantiation fails CI even when all tests pass. Do not "fix" this by editing the report expectations — fix the code or renegotiate the budget in the manifest, in the PR, out loud.
 - Latency budgets are versioned artifacts reviewed like code. A p99 regression beyond the measured noise band fails the build, naming the commit.
+- Formal `@pre` / `@post` contract proofs run through real Z3 (`>= 4.8.12`, `--smt-verify`, `--smt-report`, `--smt-timeout-ms=<ms>`, `--z3-path=<path>`) over exact C bit-vector widths (`QF_BV`). Timeouts (`Z3_UNKNOWN_TIMEOUT`) and missing solvers (`Z3_SOLVER_UNAVAILABLE`) fail closed; counterexamples (`Z3_SAT_COUNTEREXAMPLE`) must report the function, `line:col`, violated `@post`, and concrete witness bindings (see [`BUILDING.md`](BUILDING.md) §"Formal SMT Contract Verification with Z3"). Never claim `UNSAT_PROVEN` from non-SMT interval heuristics.
 
 ---
 
 ## 🛠️ Toolchain & Build
 
-- **Toolchain:** Clang / LLVM 23.1.5 (the plugin pins the exact version; mismatches are a setup error, not a compatibility bug to code around).
+- **Toolchain:** Clang / LLVM 23.1.5 (the plugin pins the exact version; mismatches are a setup error, not a compatibility bug to code around) + Z3 ≥ 4.8.12 (64-bit, compile-time contract prover).
 - **Build:** CMake + Make/Ninja; tests via CppUTest and CTest.
 - **Test suites:** `unit_rt` (micro-runtime), `plugin` (diagnostic-compliance), `integration` (end-to-end pipeline, ban corpus).
 - See [`BUILDING.md`](BUILDING.md) for setup, CLI usage, and running the full gate locally. A PR is not reviewable until the full gate passes on your machine.

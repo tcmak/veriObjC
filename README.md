@@ -29,7 +29,7 @@ VeriObjC is a *closed-world* language: the compiler sees the entire program, so 
 | Error handling | Exceptions / `NSError **` | `Result` + multi-frame `return err from f` | **Minimal** (no unwinder) |
 | Closures | Heap-allocated `^` blocks | Non-escaping function blocks | **Zero** |
 | Serialization | Frameworks + pointer fixups | Self-relative links; verified `from_bytes` | **Zero** (data layout *is* the format) |
-| Correctness | Empirical testing | SMT proofs (SMACK/Z3) on bounded paths *(planned)* | **Zero** (compile time) |
+| Correctness | Empirical testing | Z3 `QF_BV` SMT proofs on bounded `@pre`/`@post` paths | **Zero** (compile time) |
 
 The catch: VeriObjC **cannot host runtime-loaded plugins, reflection, or an open class world** — the closed world *is* the product. If you need dynamism, VeriObjC is the wrong tool, by design.
 
@@ -44,9 +44,9 @@ The catch: VeriObjC **cannot host runtime-loaded plugins, reflection, or an open
 ```
 
 1. **Subtraction first.** A Clang plugin rejects every runtime-dependent feature at the AST level, with a named diagnostic for each ban.
-2. **Then lowering.** Message sends become direct calls; sealed hierarchies become jump tables in `.rodata`; `@pre`/`@post` contracts become proof obligations.
-3. **Then proof *(planned)*.** Bounded-path memory safety and contract verification via SMACK/Z3, *before* the binary exists *(current `--smt-report` emits `UNIMPLEMENTED_STUB` obligations without invoking an external solver)*.
-4. **Then a micro-runtime.** A freestanding `libobjc` replacement in auditable C: no locks, no string tables, no `isa` tax, no libc.
+2. **Then lowering.** Message sends become direct calls; sealed hierarchies become tag-switched dispatch functions; `@pre`/`@post` contracts become `QF_BV` proof obligations.
+3. **Then proof.** Bounded-path `@pre`/`@post` contract verification via Z3 (`--smt-verify` / `--smt-report`) over exact C bit-widths *before* the binary runs, emitting concrete counterexample witnesses on violation and failing closed on timeout.
+4. **Then a micro-runtime.** A freestanding `libobjc` replacement in auditable C: no locks, no string tables, no `libobjc` dependency, no libc.
 
 **Toolchain decision record** (why four languages): the Clang plugin API forces C++; the micro-runtime and `vstd` are C (freestanding, dogfooding the language's own memory rules); the package manager `vpm` is Go (bootstrap-independent); type-rule prototyping is OCaml/Haskell (throwaway).
 
@@ -100,7 +100,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 
 ## 🧪 Verification & Measurement Discipline
 
-- **Bounded-path proofs, honestly stated.** `@pre`/`@post` contracts and memory-safety obligations target discharge by SMACK/Z3 across bounded paths before codegen *(scaffolding only today: `--smt-report` emits `UNIMPLEMENTED_STUB` obligations with no external solver invoked, and `rt_contract_eval_endpoints_stub` evaluates affine interval endpoints only)*. We target bounded-path verification — *not* mathematical totality (undecidable) and *not* Rust's whole-language soundness (a different, per-function, open-world guarantee).
+- **Bounded-path proofs, honestly stated.** `@pre`/`@post` contracts on bounded pure/FFI functions are discharged at compile time by Z3 (`>= 4.8.12`) over exact C two's-complement bit-vectors (`QF_BV`) via `--smt-verify` and `--smt-report` (`Z3_UNSAT_PROVEN`, `Z3_SAT_COUNTEREXAMPLE` with concrete witness values, or fail-closed `Z3_UNKNOWN_TIMEOUT`). We target bounded-path verification — *not* mathematical totality (undecidable) and *not* Rust's whole-language soundness (a different, per-function, open-world guarantee).
 - **Effects are typed.** `@alloc`/`@io`/`@blocking`/`@fence`/`@shared-retain` are part of every signature; an effectful call inside a `@nolatency` loop is a compile error.
 - **Reports are CI artifacts.** `--effects-report`, `--branch-report`, and `--mono-report` are diffed per build: a hot loop that *gains* an effect or an unproven branch fails review even when all tests pass.
 - **No number, no claim.** Latency budgets are versioned artifacts; benchmarks publish losses alongside wins, matching the measurement discipline common among HFT firms.
@@ -113,10 +113,10 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | :--- | :--- |
 | **Phases 0–2** (toolchain, micro-runtime, Clang plugin + LLVM IR pass: bans, `clang::CFG` move/escape dataflow, transitive zero-DSP call-graph check, standalone `@sealed` tag-switched polymorphism without `-lobjc`, `vgeneric`, `vconstexpr`, `vregex`, `veriStream` AST elaboration, ban corpus) | ✅ Implemented — 100% region/function/branch coverage on `rt/`, audited via `llvm-cov`, `nm`, and `llvm-objdump` |
 | **Phase 3** (`vstd/`, `sys0/`, `hw/`, `<vstd/contracts.h>`, `<vstd/simd.h>`, `<vstd/io.h>`, header-closure & minimal-binary cohesion gate) | ✅ Implemented — verified by `unit_rt_tests`, `plugin_tests`, `ban_corpus_tests`, and `vstd_cohesion_tests` |
-| **Phase 4** (cycle benchmark harness, survivor report diff engine, latency budget gate, contract verification) | 🟡 Partial / Scaffolding — bench harness, survivor diff, and latency gate pass unit tests; **Task 4.4 (SMACK/Z3 solver)** is **scaffolding only** (`--smt-report` emits `UNIMPLEMENTED_STUB` with no external solver invoked; `rt_contract_eval_endpoints_stub` checks affine endpoints only) |
+| **Phase 4** (cycle benchmark harness, survivor report diff engine, latency budget gate, Z3 `QF_BV` SMT contract verification) | ✅ Implemented — bench harness, survivor diff, latency gate, and real `z3 -smt2 -in` `QF_BV` contract discharge (`--smt-verify`, `--smt-report`, `--smt-timeout-ms`, `--z3-path`) pass unit and plugin tests (`TestSmtContractBridge.cpp`, `test_valid_smt_z3_proof.m`, `test_banned_smt_z3_counterexample.m`) |
 | **Phase 5** (examples smoke suite, end-to-end freestanding `@sealed` polymorphism & mixed-size `vspan` scope composition without `-lobjc`, `VOBJ` snapshot persistence, pure-CPU ternary fallback, transitive ternary zero-multiplication check) | ✅ Implemented — Tasks 5.1–5.3, Task 5.5 mixed-size `@sealed` upcast dispatch + single-store scope reset + escape policing (`e2e_sealed_polymorphism_tests`, `examples/sealed_mixed_scope.m`), `VOBJ` v1 golden corpus (`fixtures/vobj_v1/`), and pure-CPU round-half-up ternary fallback (`<vstd/ternary.h>`) pass *(Task 5.4 RTL synthesis/co-sim is out of scope for standalone `veriObjC`)* |
 | **Phase 6** (`vpm` & manifest) | ⬜ Planned |
-| **Toolchain** | Clang / LLVM 23.1.5, CppUTest, CMake |
+| **Toolchain** | Clang / LLVM 23.1.5, Z3 ≥ 4.8.12 (compile-time host verifier), CppUTest, CMake |
 | **Production usage** | None. This is a research bet that the *impossible list* is worth the closed world. |
 
 ---
