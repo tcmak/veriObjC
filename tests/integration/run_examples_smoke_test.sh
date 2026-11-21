@@ -23,7 +23,8 @@ echo "Plugin: $PLUGIN_PATH"
 echo "Repository Root: $REPO_ROOT"
 
 TMP_OBJ=$(mktemp /tmp/veriobjc_example_XXXXXX.o)
-trap 'rm -f "$TMP_OBJ"' EXIT
+TMP_SEALED_BIN=$(mktemp /tmp/veriobjc_sealed_synth_XXXXXX)
+trap 'rm -f "$TMP_OBJ" "$TMP_SEALED_BIN"' EXIT
 
 # 1. Compile and audit Objective-C (.m) examples
 for m_file in "$REPO_ROOT"/examples/*.m; do
@@ -40,9 +41,9 @@ for m_file in "$REPO_ROOT"/examples/*.m; do
              -c "$m_file" \
              -o "$TMP_OBJ"
 
-    # Verify zero dynamic dispatch or block runtime references
-    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
-        echo "[FAIL] $base_name emitted forbidden dynamic dispatch or block runtime symbol!"
+    # Verify zero dynamic dispatch, ObjC runtime constructor, or block runtime references
+    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|__objc_exec_class|_OBJC_CLASS_|_OBJC_METACLASS_|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
+        echo "[FAIL] $base_name emitted forbidden dynamic dispatch, ObjC runtime, or block runtime symbol!"
         nm "$TMP_OBJ"
         exit 1
     fi
@@ -79,6 +80,25 @@ for c_file in "$REPO_ROOT"/examples/*.c; do
 
     echo "[PASS] $base_name compiled cleanly in freestanding mode (0 undefined external symbols)."
 done
+
+# 3. Link & run standalone sealed_synth_hierarchy.m end-to-end WITHOUT -lobjc
+echo "[RUN] Standalone Executable Example: sealed_synth_hierarchy.m"
+clang-23 -std=gnu23 -O2 -Werror -fblocks \
+         -Xclang -load -Xclang "$PLUGIN_PATH" \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -fpass-plugin="$PLUGIN_PATH" \
+         -I"$REPO_ROOT/rt/include" \
+         "$REPO_ROOT/examples/sealed_synth_hierarchy.m" \
+         -o "$TMP_SEALED_BIN"
+
+if nm "$TMP_SEALED_BIN" | grep -qE "objc_msgSend|objc_msg_lookup|__objc_exec_class|_OBJC_CLASS_|_OBJC_METACLASS_|[[:space:]]U[[:space:]]+malloc|[[:space:]]U[[:space:]]+free"; then
+    echo "[FAIL] sealed_synth_hierarchy linked binary contains forbidden ObjC runtime or heap symbols!"
+    nm "$TMP_SEALED_BIN"
+    exit 1
+fi
+
+"$TMP_SEALED_BIN"
+echo "[PASS] sealed_synth_hierarchy.m linked without -lobjc and executed end-to-end cleanly."
 
 echo "=== All Examples Smoke & Acceptance Tests Passed! ==="
 exit 0

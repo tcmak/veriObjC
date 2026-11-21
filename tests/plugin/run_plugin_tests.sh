@@ -37,8 +37,8 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
              -I"$REPO_ROOT/hw/include" \
              -c "$pos_file" \
              -o "$TMP_OBJ"
-    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
-        echo "[FAIL] Positive Test $(basename "$pos_file") emitted forbidden dynamic dispatch or block runtime symbol!"
+    if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|__objc_exec_class|_OBJC_CLASS_|_OBJC_METACLASS_|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
+        echo "[FAIL] Positive Test $(basename "$pos_file") emitted forbidden dynamic dispatch, ObjC runtime, or block runtime symbol!"
         nm "$TMP_OBJ"
         exit 1
     fi

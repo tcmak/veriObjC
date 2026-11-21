@@ -122,12 +122,12 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
   - Verified across negative tests (`test_banned_nsobject.m`, `test_banned_reflection.m`, `test_banned_untyped_msg.m`) and positive class messaging test.
 
 ### 2.3 Nominal Devirtualization & Sealed Dispatch
-- [x] **Task 2.3.1: Devirtualization of `@final` / Known Types [TDD Cycle 10]**
-  - Closed-world selector check in `VisitObjCMessageExpr`: rejects undeclared selectors with fatal diagnostic (`test_banned_unresolved_msg.m`).
-  - Rewrites `[receiver message]` directly into direct C-function calls (`CallExpr` to `__veriobjc_direct_<Class>__<Selector>`) in `HandleTopLevelDecl` prior to LLVM IR emission, eliminating `objc_msgSend` and `objc_msg_lookup` (`0` dynamic dispatch calls verified via `nm` and `llvm-objdump -d`).
-- [x] **Task 2.3.2: Sealed Class & Protocol Dispatch Matrix [TDD Cycle 11]**
-  - Registered first-class `__attribute__((objc_sealed))` and `__attribute__((objc_final))` Clang Sema attribute handlers via `ParsedAttrInfoRegistry`.
-  - Enforces sealed class inheritance (`test_banned_unsealed_inheritance.m`), final class non-subclassability (`test_banned_final_inheritance.m`), and sealed protocol conformance (`test_banned_unsealed_protocol.m`).
+- [x] **Task 2.3.1: Devirtualization of `@final` / Known Types [TDD Cycle 10 / Task C2.3]**
+  - Closed-world selector check in `VisitObjCMessageExpr`: rejects undeclared selectors with fatal diagnostic (`test_banned_unresolved_msg.m`) without mutating `ObjCMessageExpr` in the AST.
+  - LLVM IR `PassInfoMixin` lowering pass (`VeriObjCStaticDispatchPass` in `compiler/src/StaticDispatchLowering.cpp`, invoked automatically via `PassBuilderCallbacks` and exported via `-fpass-plugin=`) rewrites monomorphic/`@final` `@objc_msg_lookup` call sites directly to `@_i_<Class>__<Selector>` (or header-only `@__veriobjc_direct_*`) and strips `@.objc_load_function`, `@llvm.global_ctors`, `@__objc_exec_class`, and `.objc_*`/`_OBJC_*` metadata globals (`0` ObjC runtime symbols verified via `nm` and `llvm-objdump -d`).
+- [x] **Task 2.3.2: Sealed Class & Protocol Dispatch Matrix [TDD Cycle 11 / Task C2.3]**
+  - Registered first-class `__attribute__((objc_sealed))` and `__attribute__((objc_final))` Clang Sema attribute handlers via `ParsedAttrInfoRegistry`, enforcing sealed class inheritance (`test_banned_unsealed_inheritance.m`, `valid_objc_unsealed_inheritance.m`), final class non-subclassability (`test_banned_final_inheritance.m`), sealed protocol conformance (`test_banned_unsealed_protocol.m`), and 16-bit closed-world tag uniqueness.
+  - Freestanding 8-byte prefix header (`struct veriobjc_sealed_header`, `veriobjc_alloc_sealed` in `<rt/dispatch.h>`, policed by `CfgDataflowChecks.cpp` via `test_banned_escape_sealed_upcast.m`) + LLVM IR tag-switched dispatch synthesis (`@__veriobjc_dispatch_<Class>__<Selector>`) proven end-to-end without `-lobjc` in `tests/integration/test_e2e_sealed_polymorphism.m` (`e2e_sealed_polymorphism_tests`) and `examples/sealed_synth_hierarchy.m`.
 
 ### 2.4 Linear Ownership & Data-Stack State Tracker
 - [x] **Task 2.4.1: Move Semantics & Consumed State Tracker [TDD Cycle 12 / Task C2.2]**

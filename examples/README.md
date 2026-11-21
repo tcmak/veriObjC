@@ -14,7 +14,7 @@ This directory contains two complementary sets of programs:
 | Example File | Demonstrated Language Features & Compiler Rules | Key Verification Guarantee |
 | :--- | :--- | :--- |
 | [`audio_pipeline.m`](./audio_pipeline.m) | **Freestanding `@owned` Root Classes & Scoped Data Stacks:** Allocates `BiquadFilter` on a lexical data stack (`VERIOBJC_SCOPED_STACK`, `veriobjc_alloc_init`) and processes audio samples without `NSObject` or `malloc`. | `nm` confirms `0` calls to `objc_msgSend` (`[filter processSample:]` is rewritten to `__veriobjc_direct_BiquadFilter__processSample_`); scope exit resets stack pointer in a single store. |
-| [`sealed_synth_hierarchy.m`](./sealed_synth_hierarchy.m) | **Closed-World Sealed Hierarchies & Static Devirtualization:** Demonstrates `__attribute__((objc_sealed))` base classes (`SynthVoice`) andprotocols (`VoiceModulator`) with `__attribute__((objc_final))` leaf classes (`SawtoothVoice`, `SubBassVoice`). | Every Objective-C message send on the sealed hierarchy is statically devirtualized into a direct C function call with `0` dynamic dispatch symbols. |
+| [`sealed_synth_hierarchy.m`](./sealed_synth_hierarchy.m) | **Closed-World `@sealed` Hierarchies, Polymorphic Base-Pointer Dispatch & Standalone Linking (Task C2.3):** Demonstrates `__attribute__((objc_sealed))` base classes (`AudioNode`) and protocols (`AudioProcessorProtocol`) with mixed-size `__attribute__((objc_final))` leaf classes (`SineOscillator`, `SubBassOscillator`) instantiated in a lexical arena via `veriobjc_alloc_sealed` (`<rt/dispatch.h>`). | Compiles, links **without `-lobjc`**, and runs standalone: `@final` sends lower to direct calls, `AudioNode *` sends lower to 16-bit tag-switched `__veriobjc_dispatch_AudioNode__processNextSample_`, and `nm` confirms `0` `objc_msgSend`, `objc_msg_lookup`, `__objc_exec_class`, or `malloc`/`free` symbols. |
 | [`linear_channel_router.m`](./linear_channel_router.m) | **Linear Ownership (`move` / `objc_consumed`), Escape Analysis & Flat Channels (`objc_flat`):** Allocates a packet in a generational pool, transfers ownership linearly via `veriobjc_move` into a consuming method, and transmits a pointer-free ` TelemetryEnvelope` over a lock-free SPSC channel (`veriobjc_channel_send`). | Enforces compile-time use-after-move/double-free prevention, lexical stack root escape safety, and recursive flat-struct verification (`objc_flat`). |
 | [`simd_range_filter.m`](./simd_range_filter.m) | **Zero-Overhead Range-Based For Loops (`for (T x in container)`):** Iterates over a fixed-capacity `SimdSampleBlock` (`int32_t lanes[16]`) using Objective-C fast-enumeration syntax. | Compiler plugin rewrites `ObjCForCollectionStmt` directly into a raw pointer loop (`__veriobjc_it`, `__veriobjc_end`), eliminating `NSFastEnumeration` and `objc_enumerationMutation` so LLVM auto-vectorizes the loop. |
 | [`multiframe_packet_parser.m`](./multiframe_packet_parser.m) | **Zero-Table Multi-Frame Error Returns (`return err from f`):** Deep helper functions (`validate_magic_byte`, `parse_header_layer`) abort directly out of an enclosing frame (`parse_network_frame`) via `veriobjc_return_err_from`. | Plugin statically verifies call-graph containment from every raise site to the named target frame; compiles with `0` DWARF `.eh_frame` tables and `0` unwinder calls (`__cxa_throw` / `objc_exception_throw`). |
@@ -88,6 +88,7 @@ Every file in `examples/banned/` is **100% valid, idiomatic stock Objective-C** 
 | [`valid_objc_vasync_poll_ring.m`](./banned/valid_objc_vasync_poll_ring.m) | Task 3.12: Busy-wait polling loop on `vasync_task_is_ready` | `"Banned polling ring in vasync pipeline"` | Wake `vasync` tasks exclusively via hardware interrupt hooks (`vasync_irq_wake`) |
 | [`valid_objc_raw_simd_intrinsic.m`](./banned/valid_objc_raw_simd_intrinsic.m) | Task 3.13: Calling raw vendor SIMD intrinsics (`_mm_*`) in `@nolatency` code | `"Raw SIMD intrinsic in @nolatency code is banned"` | Use portable `<vstd/simd.h>` operations (`vsimd_i32x4`) |
 | [`valid_objc_escape_via_out_param.m`](./banned/valid_objc_escape_via_out_param.m) | Task C2.2: Storing a `@scoped` data-stack allocation through an out-parameter pointer (`*out_slot = scratch`) | `"Escaping data-stack reference"` | Copy flat values out or allocate long-lived slots in an outer `vpool` |
+| [`valid_objc_unsealed_inheritance.m`](./banned/valid_objc_unsealed_inheritance.m) | Task C2.3: Open-world subclassing of a base `@interface` without `__attribute__((objc_sealed))` | `"Polymorphic class"` | Mark polymorphic base and intermediate classes `__attribute__((objc_sealed))` and leaf classes `__attribute__((objc_final))` |
 
 ---
 
@@ -112,13 +113,27 @@ You can run all positive examples and the dual-direction ban corpus via CTest or
 # 2. Run the dual-direction Ban Corpus suite (verifies stock Clang 23 PASS + VeriObjC Plugin FAIL)
 ./tests/integration/run_ban_corpus_test.sh build/libVeriObjCPlugin.so .
 
-# 3. Or run all 4 test suites together via CTest
+# 3. Or run all test suites together via CTest
 ctest --test-dir build --output-on-failure
 ```
 
 ---
 
-### B. Compile Individual Positive Examples Manually
+### B. Compile & Run Individual Positive Examples Manually
+
+#### 0. Compile, Link Standalone (Zero `-lobjc`), and Run `sealed_synth_hierarchy.m`
+```bash
+clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -Wno-objc-root-class -fblocks \
+         -Xclang -load -Xclang build/libVeriObjCPlugin.so \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -fpass-plugin=build/libVeriObjCPlugin.so \
+         -I./rt/include \
+         examples/sealed_synth_hierarchy.m \
+         -o build/sealed_synth_hierarchy
+
+./build/sealed_synth_hierarchy
+nm build/sealed_synth_hierarchy | grep -E "objc_msgSend|objc_msg_lookup|__objc_exec_class" || echo "0 ObjC runtime symbols"
+```
 
 #### 1. Compile an Objective-C Example with the VeriObjC Plugin
 ```bash

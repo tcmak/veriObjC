@@ -23,7 +23,14 @@
 #include <utility>
 #include <vector>
 
+namespace llvm {
+class PassBuilder;
+} // namespace llvm
+
 namespace veriobjc {
+
+void resetStaticDispatchModuleState();
+void registerVeriObjCPassBuilderCallbacks(llvm::PassBuilder &PB);
 
 struct VeriObjCPluginOptions {
     bool EmitEffectsReport = false;
@@ -340,10 +347,10 @@ private:
     // -----------------------------------------------------------------------
     void checkLightweightGenerics(clang::QualType T, clang::SourceLocation Loc);
     static bool hasValidSealedGenericBound(const clang::ObjCTypeParamDecl *TPD);
-    static std::string mangleDirectMethodName(const clang::ObjCInterfaceDecl *ID, clang::Selector Sel);
-    clang::FunctionDecl *getOrCreateDirectMethodDecl(clang::ObjCInterfaceDecl *ID, clang::ObjCMethodDecl *MD);
+    static std::string mangleSelectorForSymbol(clang::Selector Sel);
+    void markHeaderDirectHelperIfPresent(const clang::ObjCInterfaceDecl *ID, clang::Selector Sel);
+    void collectBodyMessageSendsPostOrder(const clang::Stmt *S, llvm::StringRef IRFuncName);
     void remapMethodVarRefs(clang::Stmt *S, const llvm::DenseMap<const clang::ValueDecl *, clang::ValueDecl *> &DeclMap);
-    clang::Expr *buildDevirtualizedCall(clang::ObjCMessageExpr *E);
     clang::ObjCIvarDecl *findBoundedArrayIvar(clang::Expr *Coll, clang::VarDecl *ElemVD, const clang::ConstantArrayType *&OutCAT);
     clang::Stmt *buildLoweredForCollection(clang::ObjCForCollectionStmt *OFS, clang::DeclContext *DC);
     clang::FunctionDecl *synthesizeMonomorphizedBlock(clang::BlockExpr *BE, llvm::SmallVectorImpl<clang::VarDecl *> &OutCaptures);
@@ -352,7 +359,6 @@ private:
     clang::Expr *tryRewriteCallExpr(clang::CallExpr *CE);
     void rewriteStmtTree(clang::Stmt *S, clang::DeclContext *DC);
     bool analyzeAndRewriteBody(clang::Stmt *Body, clang::DeclContext *DC);
-    void replaceMethodWithDirectForwarding(clang::ObjCInterfaceDecl *ID, clang::ObjCMethodDecl *MD, clang::Stmt *OrigBody);
 
 public:
     explicit VeriObjCVisitor(clang::ASTContext *Context, VeriObjCPluginOptions Opts = {})

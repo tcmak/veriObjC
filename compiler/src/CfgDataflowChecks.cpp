@@ -168,7 +168,9 @@ bool VeriObjCVisitor::isStackAllocExpr(const Expr *E) {
     const FunctionDecl *FD = CE ? CE->getDirectCallee() : nullptr;
     if (!FD) return false;
     llvm::StringRef Name = FD->getName();
-    return Name == "veriobjc_stack_alloc" || Name == "veriobjc_alloc_init";
+    return Name == "veriobjc_stack_alloc" ||
+           Name == "veriobjc_alloc_init" ||
+           Name == "veriobjc_sealed_alloc";
 }
 
 bool VeriObjCVisitor::canTypeCarryStackReference(QualType T) const {

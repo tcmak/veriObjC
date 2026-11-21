@@ -28,6 +28,7 @@ Two artifacts, both CI gates:
 | Lightweight generics (`NSArray<NSString *>`) | Yes | "Banned erased generic hints" | Real constrained `vgeneric` | `test_banned_nsarray_generics.m` ✓ |
 | Runtime thread spawn (`NSThread`, `dispatch_async`, GCD) | Yes | "Banned runtime scheduling on constrained paths" | Static topology; `vasync` fixed DAGs (`@cold`-only escape) | `test_banned_runtime_spawn.m` ✓ |
 | `@try` / `@catch` / `@finally` (unwinding) | Yes | "Banned exception unwinding" | `return err from f` (hidden flag, no unwinder) | `test_banned_try_catch.m` ✓ |
+| Open-world class inheritance without `@sealed` | Yes | "Polymorphic class" | `__attribute__((objc_sealed))` + `__attribute__((objc_final))` | `test_banned_unsealed_inheritance.m`, `valid_objc_unsealed_inheritance.m` ✓ |
 
 ### B. Memory & Ownership
 
@@ -118,7 +119,7 @@ Files of **genuinely valid stock Objective-C** that VeriObjC must refuse. Each c
 - **Passes iff:** 100% of the registry's corpus fails under the plugin **with the named diagnostic**, *and* 100% compiles clean under stock Clang 23. Both directions asserted on exit codes and diagnostic text.
 - **Runbook:** `tests/integration/run_ban_corpus_test.sh` (CTest target `ban_corpus_tests`), alongside `examples_smoke_tests`.
 - **Coverage discipline:** a registry row without a green test file is an open defect; a test file without a registry row is an undocumented ban — both fail the audit.
-- **Survivor-report analogue:** `--effects-report`, `--branch-report`, `--mono-report`, and `--hw-report` tell you what survived *inside* valid code; the ban corpus proves what was refused *at the door*. Together they close the loop.
+- **Survivor-report analogue:** `--effects-report`, `--branch-report`, and `--mono-report` tell you what survived *inside* valid code; the ban corpus proves what was refused *at the door*. Together they close the loop.
 
 ---
 

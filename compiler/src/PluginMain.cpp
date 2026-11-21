@@ -1,12 +1,15 @@
 #include "veriobjc/VeriObjCVisitor.h"
 
 #include <clang/AST/ASTConsumer.h>
+#include <clang/Basic/CodeGenOptions.h>
 #include <clang/Basic/DiagnosticSema.h>
 #include <clang/Basic/ParsedAttrInfo.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendPluginRegistry.h>
 #include <clang/Sema/ParsedAttr.h>
 #include <clang/Sema/Sema.h>
+#include <llvm/Passes/PassBuilder.h>
+#include <llvm/Plugins/PassPlugin.h>
 #include <memory>
 
 using namespace clang;
@@ -23,6 +26,7 @@ private:
 public:
     explicit VeriObjCConsumer(CompilerInstance &CI, VeriObjCPluginOptions Opts = {})
         : CI(CI), Visitor(&CI.getASTContext(), Opts) {
+        resetStaticDispatchModuleState();
         CI.getDiagnostics().setSeverity(
             diag::warn_collection_expr_type, diag::Severity::Ignored, SourceLocation()
         );
@@ -58,6 +62,11 @@ private:
 
 protected:
     std::unique_ptr<ASTConsumer> CreateASTConsumer(CompilerInstance &CI, llvm::StringRef) override {
+        CI.getCodeGenOpts().PassBuilderCallbacks.push_back(
+            [](llvm::PassBuilder &PB) {
+                registerVeriObjCPassBuilderCallbacks(PB);
+            }
+        );
         return std::make_unique<VeriObjCConsumer>(CI, Opts);
     }
 
@@ -195,3 +204,14 @@ static FrontendPluginRegistry::Add<VeriObjCAction> X(
     "veriobjc-check",
     "Enforce VeriObjC structural invariants and eliminate non-deterministic features"
 );
+
+extern "C" LLVM_ATTRIBUTE_WEAK ::llvm::PassPluginLibraryInfo llvmGetPassPluginInfo() {
+    return {
+        LLVM_PLUGIN_API_VERSION,
+        "VeriObjCPlugin",
+        LLVM_VERSION_STRING,
+        [](llvm::PassBuilder &PB) {
+            veriobjc::registerVeriObjCPassBuilderCallbacks(PB);
+        }
+    };
+}
