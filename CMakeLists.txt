@@ -183,7 +183,11 @@ find_package(Clang CONFIG HINTS
 )
 
 add_library(VeriObjCPlugin MODULE
-    compiler/src/VeriObjCPlugin.cpp
+    compiler/src/PluginMain.cpp
+    compiler/src/AstBanChecks.cpp
+    compiler/src/CfgDataflowChecks.cpp
+    compiler/src/StaticDispatchLowering.cpp
+    compiler/src/ContainerChecks.cpp
 )
 
 target_include_directories(VeriObjCPlugin PRIVATE
