@@ -225,6 +225,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 - [x] **Task 5.1: Network Processor Kernels & Audio DSP Examples Smoke Suite (`run_examples_smoke_test.sh`)**
 - [x] **Task 5.2: Round-Trip `VOBJ` v1 Snapshot Persistence (`order_book_snapshot.c`, `TestTapeAndRelPtr.cpp`)**
 - [x] **Task 5.3: Ternary Block Elaboration & Transitive Zero-Multiplication Gate (`ternary_glu_block.m`, `cfg_branch_move_router.m`)**
+- [X] **Task 5.4: retired/migrated to project setun and TernaryTape.jl
 - [x] **Task 5.5: Mixed-Size Sealed Hierarchy Composition Test (Heterogeneous Arena Allocation + Upcast Tag Dispatch + One-Store Scope Reset)**
   - *Goal:* Prove sealed polymorphism, heterogeneous ivar sizes, stack-root escape policing, and one-store scope reset together in one end-to-end freestanding composition test.
   - *Deliverables (Red ➔ Green):*
@@ -243,6 +244,10 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ## 🧰 Phase 6: Package Manager & Build Budget Runner (`vpm`)
 *(Mapped to: `docs/veriobjc-poc-execution-plan.md` §0)*
 
+- [ ] **Task 6.0: `vosh` — Self-Hosted Zero-Boilerplate Scripting & Verification Runner (`tools/vosh/`)**
+  - Written in **VeriObjC itself** (compiled in Stage 2 of CMake using `clang-23` + `libVeriObjCPlugin.so`, audited with `--effects-report` proving 0 allocations/syscalls outside `vosh_os_posix.m` `@cold @io` quarantine).
+  - Supports `#!/usr/bin/env vosh` shebang execution, `#line`-preserving top-level snippet wrapping (pre-wired `VERIOBJC_SCOPED_STACK` scratch arena), and FNV-1a-64 content-addressed binary caching (`~/.cache/vosh/`) for millisecond re-runs.
+  - Supports inline `//!` verification pragmas (`//! verify: smt, effects, branch`, `//! max-survivors: 0`) and `vosh --inspect <script.m>` TUI summary displaying Z3 `QF_BV` proof status, surviving effects, unproven branches, and `nm` zero-dispatch/zero-heap audit.
 - [ ] **Task 6.1: `vpm` Bootstrap & Content-Addressed Artifact Store**
   - Standalone CLI tool; pins the Clang/LLVM toolchain and manages a content-addressed store for verified `VOBJ` v1 snapshot images and build manifests (producer-agnostic, zero external repo coupling).
 - [ ] **Task 6.2: Package Manifest & Compile-Time Budget Enforcement**
