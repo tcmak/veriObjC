@@ -249,12 +249,12 @@ Real-world external consumer dogfooding exposed six usability and backend sharp 
 
 - [ ] **6.0.1 `cmake --install` SDK Layout & `veriobjc-cc` Compiler Wrapper (`CMakeLists.txt`, `scripts/install.sh`):**
   Install a self-contained prefix (`bin/veriobjc-cc`, `lib/veriobjc/libVeriObjCPlugin.so`, `lib/veriobjc/libveriobjc_rt.a`, `include/veriobjc/{rt,vstd,sys0,hw}`). `veriobjc-cc` automatically injects `-std=gnu23 -fblocks`, `-Xclang -load/-add-plugin veriobjc-check`, `-fpass-plugin`, and `-isystem` SDK headers, links `libveriobjc_rt.a` when producing executables, and explicitly rejects `-fobjc-runtime=gnustep*` with an actionable diagnostic (preventing the LLVM 23 GNUstep ELF COMDAT backend crash).
-- [ ] **6.0.2 Dangling COMDAT Guard in `StaticDispatchLowering` (`compiler/src/StaticDispatchLowering.cpp`):**
-  Before erasing `.objc_*` entries from `M.getComdatSymbolTable()`, clear `GO.setComdat(nullptr)` on any `GlobalObject` still referencing those COMDATs (or skip referenced entries) so the LLVM ELF backend never encounters an unnamed/dangling `Comdat*` (`exit code 70`).
-- [ ] **6.0.3 Runtime Archive Hygiene (`rt/src/veriobjc_runtime.c`):**
-  Remove or guard the internal `veriobjc_runtime_alloc_test` helper and ship `libveriobjc_rt.a` via CMake so user translation units never compile raw runtime `.c` internals under user-code stack-escape rules.
-- [ ] **6.0.4 Reject Unknown `annotate("veriobjc_*")` Spellings (`compiler/src/AstBanChecks.cpp`):**
-  Emit a hard diagnostic whenever user code writes raw `__attribute__((annotate("veriobjc_...")))` instead of canonical macros (`veriobjc_cold`, `veriobjc_pure`, `veriobjc_nolatency`), preventing typos from silently falling back to default `@nolatency` checking.
+- [x] **6.0.2 Dangling COMDAT Guard in `StaticDispatchLowering` (`compiler/src/StaticDispatchLowering.cpp`):**
+  Cleared `GO.setComdat(nullptr)` (and privatized `linkonce` `.objc_*` selector symbols) across `M.global_objects()` and skipped any referenced COMDAT before erasing `.objc_*` entries from `M.getComdatSymbolTable()`, eliminating the LLVM 23 ELF backend crash on live `@selector(...)` references (`tests/plugin/positive/test_valid_comdat_selector_guard.m`, `e2e_sealed_polymorphism_tests`).
+- [x] **6.0.3 Runtime Archive Hygiene (`rt/src/veriobjc_runtime.c`, `CMakeLists.txt`):**
+  Guarded the internal `veriobjc_runtime_*_test` disassembly probe wrappers behind `#ifdef VERIOBJC_ASM_PROBE`, added freestanding anchor `veriobjc_rt_abi_version`, and shipped `veriobjc_rt_static` (`libveriobjc_rt.a`, `-ffreestanding -mno-sse`) via CMake so `rt/src/veriobjc_runtime.c` compiles cleanly under `veriobjc-check`.
+- [x] **6.0.4 Reject Unknown `annotate("veriobjc_*")` / `annotate("objc_*")` Spellings (`compiler/src/AstBanChecks.cpp`):**
+  Implemented `VeriObjCVisitor::VisitDecl` allowlist verification emitting Goose-style diagnostics with canonical macro suggestions (`veriobjc_cold`, `veriobjc_pure`, `veriobjc_nolatency`, `veriobjc_export`) on any unrecognized `veriobjc_*` / `objc_*` `AnnotateAttr` (`test_banned_unknown_veriobjc_annotate.m`, `valid_objc_unknown_veriobjc_annotate.m`, `test_valid_canonical_annotations.m`).
 - [ ] **6.0.5 `@cold` Static Staging File Loader (`host/include/veriobjc_host_io.h`):**
   Provide a blessed `veriobjc_cold` file-to-buffer helper in `host/include/veriobjc_host_io.h` backed by caller-supplied static staging memory (returning `vresult` + `vspan`) so users don't accidentally pass `veriobjc_stack_alloc` pointers across opaque libc `fread` FFI boundaries while preserving `<vstd/io.h>`'s freestanding zero-POSIX invariant.
 - [ ] **6.0.6 Domain-Neutral `-isystem` Freestanding C99 Header Interop Test (`tests/plugin/positive/`, `tests/plugin/negative/`):**

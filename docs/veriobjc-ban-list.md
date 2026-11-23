@@ -73,6 +73,7 @@ Two artifacts, both CI gates:
 | Non-exhaustive `vmatch` on `vvariant` (including added enum cases) | "Non-exhaustive vmatch on vvariant" | Exhaustive `vmatch` covering all enum tags | `test_banned_nonexhaustive_match.m` / `test_banned_vvariant_added_case.m` ✓ |
 | Monomorphization budget exceeded | "Monomorphization budget exceeded" | Deduplicated `@mono` within package budget or `@erased` | `test_banned_mono_budget.m` ✓ |
 | Violated `@pre` / `@post` contract under Z3 `QF_BV` (`--smt-verify`) | "Z3_SAT_COUNTEREXAMPLE" | Satisfy postcondition across all C bit-width inputs (including overflow boundaries) | `test_banned_smt_z3_counterexample.m`, `valid_objc_contract_counterexample.m` ✓ |
+| Unknown raw `annotate("veriobjc_*")` / `annotate("objc_*")` spelling | "Unknown VeriObjC annotation" | Canonical macros (`veriobjc_cold`, `veriobjc_pure`, `veriobjc_nolatency`, `veriobjc_export`) | `test_banned_unknown_veriobjc_annotate.m`, `valid_objc_unknown_veriobjc_annotate.m` ✓ |
 
 ### D. veriStream
 

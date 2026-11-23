@@ -11,6 +11,110 @@ using namespace clang;
 namespace veriobjc {
 namespace {
 
+bool isKnownVeriObjCAnnotation(llvm::StringRef Ann) {
+    static constexpr llvm::StringRef kExactAllowed[] = {
+        "objc_sealed",
+        "objc_final",
+        "objc_consumed",
+        "objc_flat",
+        "objc_vconstexpr",
+        "objc_export",
+        "objc_hw_kernel",
+        "objc_nolatency",
+        "objc_pure",
+        "objc_cold",
+        "objc_effect_alloc",
+        "objc_effect_io",
+        "objc_effect_blocking",
+        "objc_effect_fence",
+        "objc_effect_shared_retain",
+        "objc_soa",
+        "objc_vvariant",
+        "objc_variant",
+        "objc_vtrait",
+        "objc_inplace_only",
+        "objc_specialize",
+        "objc_vresult",
+        "objc_vasync_task",
+        "objc_vatomic",
+        "veriobjc_vvector"
+    };
+    for (llvm::StringRef Allowed : kExactAllowed) {
+        if (Ann == Allowed) return true;
+    }
+
+    static constexpr llvm::StringRef kPrefixAllowed[] = {
+        "objc_pre:",
+        "objc_post:",
+        "objc_vflat_map:",
+        "objc_vhash_flat:",
+        "objc_interface_by_value:",
+        "objc_vvector:",
+        "objc_vbits:",
+        "objc_vstream:",
+        "objc_token_shift:",
+        "objc_kv_arena:",
+        "objc_spsc_channel:",
+        "objc_vdma_ring:"
+    };
+    for (llvm::StringRef Prefix : kPrefixAllowed) {
+        if (Ann.starts_with(Prefix) && Ann.size() > Prefix.size()) {
+            return true;
+        }
+    }
+    return false;
+}
+
+llvm::StringRef suggestCanonicalVeriObjCMacro(llvm::StringRef Raw) {
+    if (Raw.contains_insensitive("cold")) return "macro 'veriobjc_cold' (or '__attribute__((objc_cold))')";
+    if (Raw.contains_insensitive("pur")) return "macro 'veriobjc_pure' (or '__attribute__((objc_pure))')";
+    if (Raw.contains_insensitive("nolatency")) return "macro 'veriobjc_nolatency' (or '__attribute__((objc_nolatency))')";
+    if (Raw.contains_insensitive("export")) return "macro 'veriobjc_export'";
+    if (Raw.contains_insensitive("effect_io")) return "macro 'veriobjc_effect_io'";
+    if (Raw.contains_insensitive("effect_alloc")) return "macro 'veriobjc_effect_alloc'";
+    if (Raw.contains_insensitive("effect_blocking")) return "macro 'veriobjc_effect_blocking'";
+    if (Raw.contains_insensitive("effect_fence")) return "macro 'veriobjc_effect_fence'";
+    if (Raw.contains_insensitive("shared")) return "macro 'veriobjc_effect_shared_retain'";
+    if (Raw.contains_insensitive("seal")) return "attribute '__attribute__((objc_sealed))'";
+    if (Raw.contains_insensitive("final")) return "attribute '__attribute__((objc_final))'";
+    if (Raw.contains_insensitive("flat")) return "attribute '__attribute__((objc_flat))'";
+    if (Raw.contains_insensitive("consumed")) return "attribute '__attribute__((objc_consumed))'";
+    if (Raw.contains_insensitive("constexpr")) return "macro 'vconstexpr'";
+    if (Raw.contains_insensitive("hw_kernel")) return "attribute '__attribute__((objc_hw_kernel))'";
+    if (Raw.contains_insensitive("pre")) return "macro 'vcontract_pre(\"...\")'";
+    if (Raw.contains_insensitive("post")) return "macro 'vcontract_post(\"...\")'";
+    return "macros ('veriobjc_cold', 'veriobjc_pure', 'veriobjc_nolatency', 'veriobjc_export')";
+}
+
+} // namespace
+
+bool VeriObjCVisitor::VisitDecl(Decl *D) {
+    if (!D || D->isImplicit()) return true;
+    SourceManager &SM = Context->getSourceManager();
+    for (const auto *A : D->specific_attrs<AnnotateAttr>()) {
+        llvm::StringRef Ann = A->getAnnotation();
+        if (!Ann.starts_with("veriobjc_") && !Ann.starts_with("objc_")) {
+            continue;
+        }
+        if (isKnownVeriObjCAnnotation(Ann)) {
+            continue;
+        }
+        std::string DeclName = "<anonymous>";
+        if (const auto *ND = dyn_cast<NamedDecl>(D); ND && !ND->getNameAsString().empty()) {
+            DeclName = ND->getNameAsString();
+        }
+        SourceLocation Loc = A->getLocation().isValid() ? A->getLocation() : D->getLocation();
+        unsigned Line = SM.getSpellingLineNumber(Loc);
+        unsigned Col = SM.getSpellingColumnNumber(Loc);
+        reportError(
+            Loc,
+            "VeriObjC Violation: Unknown VeriObjC annotation '%0' on '%1' at %2:%3; use canonical %4 instead of raw annotate(\"...\")."
+        ) << Ann << DeclName << Line << Col << suggestCanonicalVeriObjCMacro(Ann);
+    }
+    return true;
+}
+namespace {
+
 struct NFAState {
     std::bitset<256> MatchBytes;
     int NextOnByte = -1;

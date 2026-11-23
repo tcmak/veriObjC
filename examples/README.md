@@ -92,6 +92,7 @@ Every file in `examples/banned/` is **100% valid, idiomatic stock Objective-C** 
 | [`valid_objc_unsealed_inheritance.m`](./banned/valid_objc_unsealed_inheritance.m) | Task C2.3: Open-world subclassing of a base `@interface` without `__attribute__((objc_sealed))` | `"Polymorphic class"` | Mark polymorphic base and intermediate classes `__attribute__((objc_sealed))` and leaf classes `__attribute__((objc_final))` |
 | [`valid_objc_sealed_upcast_escape.m`](./banned/valid_objc_sealed_upcast_escape.m) | Task 5.5: Escaping mixed-size `@sealed` superclass pointers out of an inner `VERIOBJC_SCOPED_STACK` via `vspan_init` | `"Escaping data-stack reference"` | Keep `vspan` slices of `@sealed` arena objects within their lexical `VERIOBJC_SCOPED_STACK` lifetime |
 | [`valid_objc_contract_counterexample.m`](./banned/valid_objc_contract_counterexample.m) | Task 4.4: Off-by-one slot index clamp (`slot_idx == 64`) violating `vcontract_post("result >= 0 && result < 64")` under `--smt-verify` | `"Z3_SAT_COUNTEREXAMPLE"` | Fix the upper guard (`slot_idx >= 64`) so Z3 proves `UNSAT_PROVEN` across all 32-bit inputs |
+| [`valid_objc_unknown_veriobjc_annotate.m`](./banned/valid_objc_unknown_veriobjc_annotate.m) | Task 6.0.4: Raw `__attribute__((annotate("veriobjc_cold")))` typo bypassing canonical effect/context macros | `"Unknown VeriObjC annotation"` | Use canonical macros (`veriobjc_cold`, `veriobjc_pure`, `veriobjc_nolatency`, `veriobjc_export`) |
 
 ---
 

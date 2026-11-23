@@ -381,6 +381,7 @@ public:
     void finalizeTranslationUnitAudits();
     void lowerTopLevelDecl(clang::Decl *D);
 
+    bool VisitDecl(clang::Decl *D);
     bool VisitVarDecl(clang::VarDecl *D);
     bool VisitSwitchStmt(clang::SwitchStmt *SS);
     bool VisitParmVarDecl(clang::ParmVarDecl *D);

@@ -6,7 +6,7 @@
 #include "vstd/io.h"
 
 VVector_decl(int32_t, 4);
-vdma_ring_def(CanonicalDmaRing4, 4);
+vdma_ring_def(CanonicalDmaRing4, 64, 4);
 
 veriobjc_cold veriobjc_effect_io
 int32_t canonical_cold_entry(int32_t status) {
@@ -31,5 +31,5 @@ int32_t canonical_nolatency_step(void) {
     CanonicalDmaRing4 ring;
     vdma_ring_init(&ring);
     int32_t *first = vvector_at(&vec, 0u);
-    return (first ? *first : 0) + (int32_t)vdma_ring_pending(&ring);
+    return (first ? *first : 0) + (int32_t)ring.head;
 }
