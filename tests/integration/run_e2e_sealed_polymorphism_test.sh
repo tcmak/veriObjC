@@ -26,7 +26,9 @@ TMP_BIN_O2=$(mktemp /tmp/veriobjc_sealed_e2e_o2_XXXXXX)
 TMP_MIXED_OBJ=$(mktemp /tmp/veriobjc_sealed_mixed_XXXXXX.o)
 TMP_MIXED_BIN_O0=$(mktemp /tmp/veriobjc_sealed_mixed_o0_XXXXXX)
 TMP_MIXED_BIN_O2=$(mktemp /tmp/veriobjc_sealed_mixed_o2_XXXXXX)
-trap 'rm -f "$TMP_OBJ" "$TMP_BIN_O0" "$TMP_BIN_O2" "$TMP_MIXED_OBJ" "$TMP_MIXED_BIN_O0" "$TMP_MIXED_BIN_O2"' EXIT
+TMP_COMDAT_BIN=$(mktemp /tmp/veriobjc_comdat_guard_XXXXXX)
+TMP_RT_CHECK_OBJ=$(mktemp /tmp/veriobjc_rt_hygiene_XXXXXX.o)
+trap 'rm -f "$TMP_OBJ" "$TMP_BIN_O0" "$TMP_BIN_O2" "$TMP_MIXED_OBJ" "$TMP_MIXED_BIN_O0" "$TMP_MIXED_BIN_O2" "$TMP_COMDAT_BIN" "$TMP_RT_CHECK_OBJ"' EXIT
 
 echo "=== VeriObjC End-to-End Freestanding @sealed Polymorphism Gate ==="
 echo "Plugin: $PLUGIN_PATH"
@@ -170,4 +172,56 @@ if ! echo "$MIXED_DISASM" | awk '/<run_mixed_sealed_scope_batch>:/,/^$/' | grep 
 fi
 
 echo "[PASS] Mixed-size @sealed composition test passed (-O0/-O2 runtime, 0 ObjC/heap symbols, 1-store movq scope reset verified)."
+
+# 6. Task 6.0.2 Dangling COMDAT Guard Regression Gate (-O2 -fpass-plugin with live @selector)
+COMDAT_SRC="$REPO_ROOT/tests/plugin/positive/test_valid_comdat_selector_guard.m"
+echo "[RUN] COMDAT Guard Regression Test: $(basename "$COMDAT_SRC")"
+clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -Wno-objc-root-class \
+         -DVERIOBJC_COMDAT_E2E_MAIN \
+         -Xclang -load -Xclang "$PLUGIN_PATH" \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -fpass-plugin="$PLUGIN_PATH" \
+         -I"$REPO_ROOT/rt/include" \
+         "$COMDAT_SRC" \
+         -o "$TMP_COMDAT_BIN"
+"$TMP_COMDAT_BIN"
+echo "[PASS] COMDAT guard regression test compiled, linked without -lobjc, and ran cleanly at -O2."
+
+# 7. Task 6.0.3 Runtime Archive Hygiene Gate (rt/src/veriobjc_runtime.c + libveriobjc_rt.a)
+RT_ARCHIVE="$(dirname "$PLUGIN_PATH")/libveriobjc_rt.a"
+echo "[RUN] Runtime Archive Hygiene Test: rt/src/veriobjc_runtime.c & $(basename "$RT_ARCHIVE")"
+if [ ! -f "$RT_ARCHIVE" ]; then
+    echo "[FAIL] Expected static runtime archive $RT_ARCHIVE not found!"
+    exit 1
+fi
+if nm "$RT_ARCHIVE" | grep -q " U "; then
+    echo "[FAIL] libveriobjc_rt.a contains undefined external symbol(s)!"
+    nm "$RT_ARCHIVE"
+    exit 1
+fi
+clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror \
+         -Xclang -load -Xclang "$PLUGIN_PATH" \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -I"$REPO_ROOT/rt/include" \
+         -c "$REPO_ROOT/rt/src/veriobjc_runtime.c" \
+         -o "$TMP_RT_CHECK_OBJ"
+clang-23 -std=gnu23 -O2 -Wall -Wextra -Werror -Wno-objc-root-class \
+         -DVERIOBJC_COMDAT_E2E_MAIN \
+         -Xclang -load -Xclang "$PLUGIN_PATH" \
+         -Xclang -add-plugin -Xclang veriobjc-check \
+         -fpass-plugin="$PLUGIN_PATH" \
+         -I"$REPO_ROOT/rt/include" \
+         "$COMDAT_SRC" "$RT_ARCHIVE" \
+         -o "$TMP_COMDAT_BIN"
+"$TMP_COMDAT_BIN"
+clang-23 -std=gnu23 -O2 -ffreestanding -nostdlib -DVERIOBJC_ASM_PROBE \
+         -I"$REPO_ROOT/rt/include" \
+         -c "$REPO_ROOT/rt/src/veriobjc_runtime.c" \
+         -o "$TMP_RT_CHECK_OBJ"
+if ! nm "$TMP_RT_CHECK_OBJ" | grep -q "veriobjc_runtime_scope_guard_test"; then
+    echo "[FAIL] Expected -DVERIOBJC_ASM_PROBE to retain disassembly probe veriobjc_runtime_scope_guard_test!"
+    exit 1
+fi
+echo "[PASS] Runtime archive hygiene verified (rt/src/veriobjc_runtime.c passes veriobjc-check; libveriobjc_rt.a links cleanly)."
+
 echo "=== All Freestanding @sealed Polymorphism Checks Passed! ==="

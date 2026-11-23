@@ -95,6 +95,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_contract_counterexample.m)
             EXPECTED_DIAG="Z3_SAT_COUNTEREXAMPLE"
             ;;
+        valid_objc_unknown_veriobjc_annotate.m)
+            EXPECTED_DIAG="Unknown VeriObjC annotation"
+            ;;
         valid_objc_unchecked_vresult.m)
             EXPECTED_DIAG="Unchecked vresult access"
             ;;

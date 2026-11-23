@@ -321,6 +321,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Raw SIMD intrinsic in @nolatency code is banned"
     elif [[ "$base_name" == test_banned_smt_z3_counterexample* ]]; then
         EXPECTED_MSG="Z3_SAT_COUNTEREXAMPLE"
+    elif [[ "$base_name" == test_banned_unknown_veriobjc_annotate* ]]; then
+        EXPECTED_MSG="VeriObjC Violation: Unknown VeriObjC annotation"
     fi
 
     EXTRA_PLUGIN_ARGS=()
@@ -344,6 +346,15 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
             for req_tok in "unchecked_add_margin_i32" "10:39" "@post(result > price)" "price =" "margin =" "result ="; do
                 if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
                     echo "[FAIL] Missing Goose-style witness/location token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
+        if [[ "$base_name" == test_banned_unknown_veriobjc_annotate* ]]; then
+            for req_tok in "veriobjc_cold" "legacy_init_loader" "objc_purr" "veriobjc_pure"; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing canonical suggestion/identifier token '$req_tok' in $base_name!"
                     echo "$OUTPUT"
                     exit 1
                 fi
