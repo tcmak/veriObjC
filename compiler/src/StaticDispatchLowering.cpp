@@ -562,14 +562,30 @@ public:
             }
         }
 
+        llvm::DenseSet<const llvm::Comdat *> ReferencedComdats;
+        for (llvm::GlobalObject &GO : M.global_objects()) {
+            const llvm::Comdat *C = GO.getComdat();
+            if (!C) continue;
+            if (C->getName().starts_with(".objc_")) {
+                GO.setComdat(nullptr);
+                if (GO.getName().starts_with(".objc_") && GO.hasLinkOnceLinkage()) {
+                    GO.setLinkage(llvm::GlobalValue::PrivateLinkage);
+                }
+                Modified = true;
+            } else {
+                ReferencedComdats.insert(C);
+            }
+        }
+
         llvm::SmallVector<std::string, 8> DeadComdats;
         for (const auto &Entry : M.getComdatSymbolTable()) {
-            if (Entry.first().starts_with(".objc_")) {
+            if (Entry.first().starts_with(".objc_") && !ReferencedComdats.contains(&Entry.second)) {
                 DeadComdats.push_back(Entry.first().str());
             }
         }
         for (const std::string &CName : DeadComdats) {
             M.getComdatSymbolTable().erase(CName);
+            Modified = true;
         }
 
         return Modified ? llvm::PreservedAnalyses::none() : llvm::PreservedAnalyses::all();
