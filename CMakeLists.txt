@@ -108,6 +108,22 @@ target_include_directories(veriobjc_rt INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/rt/include
 )
 
+add_library(veriobjc_rt_static STATIC
+    rt/src/veriobjc_runtime.c
+)
+target_link_libraries(veriobjc_rt_static PUBLIC veriobjc_rt)
+target_compile_options(veriobjc_rt_static PRIVATE
+    -ffreestanding
+    -mno-sse
+    -Wall
+    -Wextra
+    -Werror
+)
+set_target_properties(veriobjc_rt_static PROPERTIES
+    OUTPUT_NAME "veriobjc_rt"
+    ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
+)
+
 add_library(veriobjc_vstd INTERFACE)
 target_include_directories(veriobjc_vstd INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}/vstd/include

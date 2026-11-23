@@ -165,7 +165,9 @@ nm build/lib/your_module.o | grep "U "
 Audit that scope teardown compiles to exactly **one `mov` store instruction** rather than calling destructors or walking linked lists:
 
 ```bash
-llvm-objdump-23 -d build/veriobjc_runtime.o --disassemble-symbols=veriobjc_runtime_scope_guard_test
+clang-23 -O2 -ffreestanding -nostdlib -DVERIOBJC_ASM_PROBE -I./rt/include \
+         -c rt/src/veriobjc_runtime.c -o build/veriobjc_runtime_probe.o
+llvm-objdump-23 -d build/veriobjc_runtime_probe.o --disassemble-symbols=veriobjc_runtime_scope_guard_test
 ```
 You will see:
 ```x86asm
