@@ -8,7 +8,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Phases 0–5 Complete (including mixed-size `@sealed` scope composition & real Z3 `QF_BV` SMT contract discharge); **Next Up:** Phase 6 (`vpm` Package Manager & Build Budget Runner)
+* **Overall Status:** Phases 0–5 Complete (including mixed-size `@sealed` scope composition & real Z3 `QF_BV` SMT contract discharge); **Next Up:** Phase 6 (`SDK Driver (veriobjc-cc), Scripting (vosh) & Package Manager (vpm)`)
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`clang-23`) + Z3 ≥ 4.8.12 (64-bit host prover), split cleanly across `PluginMain.cpp`, `AstBanChecks.cpp`, `CfgDataflowChecks.cpp`, `ContainerChecks.cpp`, `StaticDispatchLowering.cpp`, and `SmtContractVerifier.cpp`
 * **Test Framework:** CppUTest (`CPPUTEST_ROOT`)
 * **Build System:** CMake + Make / Ninja (portable `find_package(LLVM REQUIRED CONFIG)`)
@@ -241,13 +241,31 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ---
 
-## 🧰 Phase 6: Package Manager & Build Budget Runner (`vpm`)
+## 🧰 Phase 6: SDK Driver (veriobjc-cc), Scripting (vosh) & Package Manager (vpm)
 *(Mapped to: `docs/veriobjc-poc-execution-plan.md` §0)*
 
+### Block 6.0 — SDK Packaging, `veriobjc-cc` Driver & C99 Interop Hardening
+Real-world external consumer dogfooding exposed six usability and backend sharp edges that must be closed before `vosh` builds on top of the SDK:
+
+- [ ] **6.0.1 `cmake --install` SDK Layout & `veriobjc-cc` Compiler Wrapper (`CMakeLists.txt`, `scripts/install.sh`):**
+  Install a self-contained prefix (`bin/veriobjc-cc`, `lib/veriobjc/libVeriObjCPlugin.so`, `lib/veriobjc/libveriobjc_rt.a`, `include/veriobjc/{rt,vstd,sys0,hw}`). `veriobjc-cc` automatically injects `-std=gnu23 -fblocks`, `-Xclang -load/-add-plugin veriobjc-check`, `-fpass-plugin`, and `-isystem` SDK headers, links `libveriobjc_rt.a` when producing executables, and explicitly rejects `-fobjc-runtime=gnustep*` with an actionable diagnostic (preventing the LLVM 23 GNUstep ELF COMDAT backend crash).
+- [ ] **6.0.2 Dangling COMDAT Guard in `StaticDispatchLowering` (`compiler/src/StaticDispatchLowering.cpp`):**
+  Before erasing `.objc_*` entries from `M.getComdatSymbolTable()`, clear `GO.setComdat(nullptr)` on any `GlobalObject` still referencing those COMDATs (or skip referenced entries) so the LLVM ELF backend never encounters an unnamed/dangling `Comdat*` (`exit code 70`).
+- [ ] **6.0.3 Runtime Archive Hygiene (`rt/src/veriobjc_runtime.c`):**
+  Remove or guard the internal `veriobjc_runtime_alloc_test` helper and ship `libveriobjc_rt.a` via CMake so user translation units never compile raw runtime `.c` internals under user-code stack-escape rules.
+- [ ] **6.0.4 Reject Unknown `annotate("veriobjc_*")` Spellings (`compiler/src/AstBanChecks.cpp`):**
+  Emit a hard diagnostic whenever user code writes raw `__attribute__((annotate("veriobjc_...")))` instead of canonical macros (`veriobjc_cold`, `veriobjc_pure`, `veriobjc_nolatency`), preventing typos from silently falling back to default `@nolatency` checking.
+- [ ] **6.0.5 `@cold` Static Staging File Loader (`host/include/veriobjc_host_io.h`):**
+  Provide a blessed `veriobjc_cold` file-to-buffer helper in `host/include/veriobjc_host_io.h` backed by caller-supplied static staging memory (returning `vresult` + `vspan`) so users don't accidentally pass `veriobjc_stack_alloc` pointers across opaque libc `fread` FFI boundaries while preserving `<vstd/io.h>`'s freestanding zero-POSIX invariant.
+- [ ] **6.0.6 Domain-Neutral `-isystem` Freestanding C99 Header Interop Test (`tests/plugin/positive/`, `tests/plugin/negative/`):**
+  Add a synthetic single-file C99 stress header (function-like bit/endian macros, `static inline` cursor helpers, C casts) included via `-isystem`, verifying clean compilation + `VERIOBJC_SCOPED_STACK` non-escape in `veriobjc_cold` init, paired with a negative test confirming unannotated C calls inside `veriobjc_nolatency` still fail closed.
 - [ ] **Task 6.0: `vosh` — Self-Hosted Zero-Boilerplate Scripting & Verification Runner (`tools/vosh/`)**
   - Written in **VeriObjC itself** (compiled in Stage 2 of CMake using `clang-23` + `libVeriObjCPlugin.so`, audited with `--effects-report` proving 0 allocations/syscalls outside `vosh_os_posix.m` `@cold @io` quarantine).
   - Supports `#!/usr/bin/env vosh` shebang execution, `#line`-preserving top-level snippet wrapping (pre-wired `VERIOBJC_SCOPED_STACK` scratch arena), and FNV-1a-64 content-addressed binary caching (`~/.cache/vosh/`) for millisecond re-runs.
   - Supports inline `//!` verification pragmas (`//! verify: smt, effects, branch`, `//! max-survivors: 0`) and `vosh --inspect <script.m>` TUI summary displaying Z3 `QF_BV` proof status, surviving effects, unproven branches, and `nm` zero-dispatch/zero-heap audit.
+
+### Block 6.1 — Package Manager & Build Budget Runner (`vpm`)
+
 - [ ] **Task 6.1: `vpm` Bootstrap & Content-Addressed Artifact Store**
   - Standalone CLI tool; pins the Clang/LLVM toolchain and manages a content-addressed store for verified `VOBJ` v1 snapshot images and build manifests (producer-agnostic, zero external repo coupling).
 - [ ] **Task 6.2: Package Manifest & Compile-Time Budget Enforcement**
