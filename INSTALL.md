@@ -79,7 +79,8 @@ if ! command -v "clang-$LLVM_VERSION" >/dev/null 2>&1; then
     "clang-$LLVM_VERSION" \
     "llvm-$LLVM_VERSION" \
     "llvm-$LLVM_VERSION-dev" \
-    "libclang-cpp-$LLVM_VERSION-dev"
+    "libclang-$LLVM_VERSION-dev" \
+    "libclang-cpp${LLVM_VERSION}-dev"
 fi
 
 if [ "$SKIP_CPPUTEST" -eq 1 ]; then
@@ -188,7 +189,7 @@ The only hard rule: **the plugin must be built by and against the same Clang maj
 | `libVeriObjCPlugin.so: undefined symbol` / binary mismatch on load | Plugin built against a different LLVM than the `clang` on `PATH` | `export CC=clang-23 CXX=clang++-23` and rebuild; verify `clang --version` |
 | CMake can't find CppUTest | `CPPUTEST_ROOT` unset or wrong | Point `-DCPPUTEST_ROOT=...` or `export CPPUTEST_ROOT=...` at the CppUTest checkout containing `cpputest_build/` (or `build/`) |
 | `unit_rt_tests` absent from CTest | Installed with `--no-cpputest`, or tests disabled at configure time | Re-run `scripts/install.sh` without the flag; rebuild with tests enabled |
-| `llvm-23-dev` missing | Script ran on a machine where `llvm.sh` partially failed | `sudo apt-get install llvm-23-dev libclang-cpp-23-dev` |
+| `llvm-23-dev` missing | Script ran on a machine where `llvm.sh` partially failed | `sudo apt-get install llvm-23-dev libclang-23-dev libclang-cpp23-dev` |
 | Plugin tests skipped silently | Plugin not registered under `-plugin veriobjc-check` | Check the CMake option enabling plugin tests; see BUILDING.md |
 | `error: unknown attribute` on `objc_sealed` etc. | Compiling without the plugin | Run `clang-23` with `-Xclang -load -Xclang libVeriObjCPlugin.so -add-plugin veriobjc-check` (BUILDING.md documents the wrapper) |
 | CMake fails with `Z3 SMT solver not found` or `requires Z3 >= 4.8.12` | `z3` missing on `PATH` or older than `4.8.12` | Install via `sudo apt-get install z3`, point `-DZ3_EXECUTABLE=/path/to/z3` at a ≥ 4.8.12 binary, or pass `-DVERIOBJC_REQUIRE_Z3=OFF` when configuring without SMT contract checks |

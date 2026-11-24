@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="${1:-.}"
+REPO_ROOT="$(cd "${1:-.}" && pwd)"
 README_FILE="$REPO_ROOT/examples/README.md"
 
 echo "=== VeriObjC Phase 3 Header Cohesion, Minimal-Binary & Layer Table Gate ==="
@@ -57,9 +57,24 @@ for hdr in "$REPO_ROOT"/rt/include/rt/*.h; do
 done
 check_rt_no_float_double() {
     local rt_hdr="$1"
-    local preproc_out
-    preproc_out="$(clang-23 -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include" -E -P "$rt_hdr")"
-    if printf '%s\n' "$preproc_out" | grep -qwE "float|double"; then
+    local rt_hdr_abs
+    rt_hdr_abs="$(cd "$(dirname "$rt_hdr")" && pwd)/$(basename "$rt_hdr")"
+    local preproc_raw repo_only_lines
+    preproc_raw="$(clang-23 -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include" -E "$rt_hdr_abs")"
+    repo_only_lines="$(
+        printf '%s\n' "$preproc_raw" | awk -v repo_prefix="$REPO_ROOT/" -v target_hdr="$rt_hdr_abs" '
+            /^#[[:space:]]+[0-9]+[[:space:]]+"/ {
+                file = $0
+                sub(/^#[[:space:]]+[0-9]+[[:space:]]+"/, "", file)
+                sub(/".*$/, "", file)
+                in_scope = (index(file, repo_prefix) == 1 || file == target_hdr) ? 1 : 0
+                next
+            }
+            /^#/ { next }
+            in_scope { print }
+        '
+    )"
+    if printf '%s\n' "$repo_only_lines" | grep -qwE "float|double"; then
         return 1
     fi
     return 0
