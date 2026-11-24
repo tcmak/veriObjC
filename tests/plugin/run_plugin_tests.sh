@@ -35,6 +35,7 @@ for pos_file in "$REPO_ROOT"/tests/plugin/positive/*.m; do
              -I"$REPO_ROOT/vstd/include" \
              -I"$REPO_ROOT/sys0/include" \
              -I"$REPO_ROOT/hw/include" \
+             -I"$REPO_ROOT/host/include" \
              -c "$pos_file" \
              -o "$TMP_OBJ"
     if nm "$TMP_OBJ" | grep -qE "objc_msgSend|objc_msg_lookup|__objc_exec_class|_OBJC_CLASS_|_OBJC_METACLASS_|objc_enumerationMutation|_NSConcreteStackBlock|_NSConcreteGlobalBlock|_Block_object_assign"; then
@@ -323,6 +324,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Z3_SAT_COUNTEREXAMPLE"
     elif [[ "$base_name" == test_banned_unknown_veriobjc_annotate* ]]; then
         EXPECTED_MSG="VeriObjC Violation: Unknown VeriObjC annotation"
+    elif [[ "$base_name" == test_banned_host_io_in_default_fn* ]]; then
+        EXPECTED_MSG="@cold function 'veriobjc_host_load_file_staged' cannot be called from non-@cold function"
     fi
 
     EXTRA_PLUGIN_ARGS=()
@@ -338,6 +341,7 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
                       -I"$REPO_ROOT/vstd/include" \
                       -I"$REPO_ROOT/sys0/include" \
                       -I"$REPO_ROOT/hw/include" \
+                      -I"$REPO_ROOT/host/include" \
                       -c "$test_file" \
                       -o /dev/null 2>&1 || true)
 
@@ -355,6 +359,15 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
             for req_tok in "veriobjc_cold" "legacy_init_loader" "objc_purr" "veriobjc_pure"; do
                 if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
                     echo "[FAIL] Missing canonical suggestion/identifier token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
+        if [[ "$base_name" == test_banned_host_io_in_default_fn* ]]; then
+            for req_tok in "illegal_call_host_loader_in_default_fn" "illegal_call_host_loader_in_nolatency_fn" "Banned cross-boundary ownership"; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing expected diagnostic token '$req_tok' in $base_name!"
                     echo "$OUTPUT"
                     exit 1
                 fi

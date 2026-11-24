@@ -173,6 +173,7 @@ if(BUILD_TESTING)
         tests/unit_rt/TestSurvivorReport.cpp
         tests/unit_rt/TestLatencyBudgetGate.cpp
         tests/unit_rt/TestSmtContractBridge.cpp
+        tests/unit_rt/TestHostIo.cpp
     )
 
     target_compile_definitions(unit_rt_tests PRIVATE
