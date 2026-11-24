@@ -55,8 +55,18 @@ for hdr in "$REPO_ROOT"/rt/include/rt/*.h; do
     check_header_layer "$hdr" "rt" "(vstd/|sys0/|hw/|host/)" \
         -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include"
 done
+check_rt_no_float_double() {
+    local rt_hdr="$1"
+    local preproc_out
+    preproc_out="$(clang-23 -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include" -E -P "$rt_hdr")"
+    if printf '%s\n' "$preproc_out" | grep -qwE "float|double"; then
+        return 1
+    fi
+    return 0
+}
+
 for rt_hdr in "$REPO_ROOT/rt/include/veriobjc_runtime.h" "$REPO_ROOT"/rt/include/rt/*.h; do
-    if clang-23 -ffreestanding -mno-sse -I"$REPO_ROOT/rt/include" -E -P "$rt_hdr" | grep -qwE "float|double"; then
+    if ! check_rt_no_float_double "$rt_hdr"; then
         echo "[FAIL] Freestanding header $rt_hdr contains forbidden floating-point type (float/double)!"
         exit 1
     fi
@@ -107,11 +117,20 @@ done
 # 5. Negative Self-Test: Verify gate rejects a synthetic leaf header with an illegal cross-layer include (both C and Objective-C halves)
 TMP_BAD_HDR=$(mktemp /tmp/veriobjc_bad_hdr_XXXXXX.h)
 TMP_BAD_OBJC_HDR=$(mktemp /tmp/veriobjc_bad_objc_hdr_XXXXXX.h)
+TMP_BAD_RT_FLOAT_HDR=$(mktemp /tmp/veriobjc_bad_rt_float_XXXXXX.h)
 TMP_SRC=$(mktemp /tmp/veriobjc_leaf_XXXXXX.c)
 TMP_BIN=$(mktemp /tmp/veriobjc_leaf_bin_XXXXXX)
 TMP_HW_BIN=$(mktemp /tmp/veriobjc_hello_world_XXXXXX)
 TMP_UART_BIN=$(mktemp /tmp/veriobjc_hello_uart_XXXXXX)
-trap 'rm -f "$TMP_BAD_HDR" "$TMP_BAD_OBJC_HDR" "$TMP_SRC" "$TMP_BIN" "$TMP_HW_BIN" "$TMP_UART_BIN"' EXIT
+trap 'rm -f "$TMP_BAD_HDR" "$TMP_BAD_OBJC_HDR" "$TMP_BAD_RT_FLOAT_HDR" "$TMP_SRC" "$TMP_BIN" "$TMP_HW_BIN" "$TMP_UART_BIN"' EXIT
+
+cp "$REPO_ROOT/rt/include/rt/dispatch.h" "$TMP_BAD_RT_FLOAT_HDR"
+printf '\nstatic inline float __veriobjc_synthetic_bad_float(float x) { return x; }\n' >> "$TMP_BAD_RT_FLOAT_HDR"
+if check_rt_no_float_double "$TMP_BAD_RT_FLOAT_HDR"; then
+    echo "[FAIL] Negative self-test failed: synthetic float in freestanding rt header copy escaped check_rt_no_float_double!"
+    exit 1
+fi
+echo "[PASS] Negative self-test verified: synthetic float in freestanding rt header copy is rejected."
 
 cat > "$TMP_BAD_HDR" << 'EOF'
 #pragma once
