@@ -113,7 +113,7 @@ __attribute__((objc_sealed))
 @end
 ```
 
-Full runnable examples in [`examples/`](examples/) include `@sealed` mixed-size scope dispatch (`sealed_mixed_scope.m`), Z3 bounds proofs (`vcontracts_bounds_proof.m`), `@cold` static file staging (`host_staged_file_loader.m`), `-isystem` freestanding C99 interop (`isystem_c99_frame_stage.m`), fixed-point audio processing, and matmul-free ternary inference (`objc_hw_kernel` direct and transitive call-graph zero-multiplication check enforced).
+Full runnable examples in [`examples/`](examples/) include `@sealed` mixed-size scope dispatch (`sealed_mixed_scope.m`), Z3 bounds proofs (`vcontracts_bounds_proof.m`), `@cold` static file staging (`host_staged_file_loader.m`), `-isystem` freestanding C99 interop (`isystem_c99_frame_stage.m`), fixed-point audio processing, and matmul-free ternary inference (`objc_hw_kernel` — experimental compile-time AST/call-graph zero-DSP contract check; emits freestanding C/ObjC machine code rather than Verilog/RTL, consuming external MMIO/CSR headers via `veriobjc-cc -isystem`).
 
 ---
 
@@ -163,7 +163,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | [`docs/veriobjc-poc-execution-plan.md`](docs/veriobjc-poc-execution-plan.md) | PoC execution plan, language decision record, acceptance criteria |
 | [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) | Ban Registry (54 bans, diagnostics, tests) + rejection corpus rules |
 | [`docs/veriobjc-foundational-library.md`](docs/veriobjc-foundational-library.md) | `vstd` design: strings, stacks, variants, channels, atomics, FFI matrix |
-| [`docs/veriobjc-advanced-substrate.md`](docs/veriobjc-advanced-substrate.md) | vmeta metaprogramming, vregex, `veriStream` fixed-point streaming substrate |
+| [`docs/veriobjc-advanced-substrate.md`](docs/veriobjc-advanced-substrate.md) | vmeta metaprogramming, vregex, experimental `veriStream` / `objc_hw_kernel` compile-time streaming & zero-DSP contracts (no RTL emission) |
 | [`docs/veriobjc-type-system-and-metaprogramming-vmeta.md`](docs/veriobjc-type-system-and-metaprogramming-vmeta.md) | Nominal local type inference (`auto`), constrained `vgeneric`, `vconstexpr`, `vregex` |
 | [`docs/veriobjc-master-library-mapping-matrix.md`](docs/veriobjc-master-library-mapping-matrix.md) | Master library mapping matrix across standard, low-level, and hardware tiers |
 | [`docs/veriobjc-examples.md`](docs/veriobjc-examples.md) | Architectural design walkthroughs and domain examples |

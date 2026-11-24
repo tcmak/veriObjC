@@ -99,7 +99,7 @@ static inline int32_t vternary_glu_mux_gate(int32_t main_val, int32_t gate_sign)
     return (gate_sign > 0) ? main_val : 0;
 }
 
-// Round-half-up arithmetic right shift matching setun/docs/NUMERICS.md §2.4:
+// Round-half-up arithmetic right shift 
 //   shift == 0 -> val
 //   shift > 0  -> (val + (1 << (shift - 1))) >> shift
 static inline int32_t vternary_round_shift_right(int64_t val, uint32_t shift) {
@@ -117,7 +117,7 @@ static inline int32_t vternary_rmsnorm_shift(int32_t val, uint32_t shift_bits) {
 }
 
 // Pure CPU software fallback 512-lane ternary dot product with round-half-up right shift.
-// Note: Hardware RTL/CSR definitions and co-simulation oracles live exclusively in setun.
+// Note: Hardware RTL/CSR definitions and co-simulation oracles.
 static inline int32_t veriobjc_ternary_dot_512(
     const int8_t *activations,
     const uint8_t *packed_weights_128,

@@ -206,6 +206,13 @@ Standard blocking POSIX socket operations (`read()`, `write()`) are prohibited a
 
 **Hardware-native streams for MatMul-free AI.**
 
+> **Status: Experimental (Compile-Time Hardware Contracts Only — No Verilog/RTL Emission).**
+> In standalone `veriObjC`, `objc_hw_kernel` and `veriStream` stream types enforce **compile-time structural and datapath invariants** inside the Clang plugin:
+> - Direct and transitive closed-world `0-DSP` call-graph verification (rejecting runtime `*`, `/`, `%`, indirect calls, and bodyless `extern` callees).
+> - Stream width-matching (`zip`) and `ContextCap` window bounds checking.
+>
+> `veriObjC` does **not** synthesize Verilog, maintain hardware cost models, or define SoC register maps. Hardware RTL and co-simulation oracles live in dedicated hardware repositories; `veriObjC` firmware and drivers interface with hardware accelerators by including generated C register headers (such as MMIO `csr.h` maps) via `veriobjc-cc -isystem`.
+
 - **Inspired by:** BitNet b1.58 and the Scalable MatMul-free Language Modeling line of work — ternary-weight LLMs whose "multiplications" are really additions. That paper's own FPGA implementation reports ternary matrix multiplication dominating token-generation latency; `veriStream` exists to make that kernel pure LUT logic.
 - **The Concept:** MatMul-free models remove multipliers from the *math*; `veriStream` removes them from the *hardware*. It provides the two primitives missing from C++/Java/ObjC:
   - **`Bits<W>`** — a fixed-width wire, `W` a `vconstexpr` parameter. `popcount`, `mux`, shifts, adds: branchless by construction, zero-cost, the flat-value idea taken to single wires. Signed 8-bit activations (BitNet-style absmax quantization) are the default payload type.
