@@ -93,6 +93,12 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_use_after_move_field_alias.m)
             EXPECTED_DIAG="Use of consumed linear variable"
             ;;
+        valid_objc_hw_kernel_fnptr_call.m)
+            EXPECTED_DIAG="closed-world 0-DSP verification requires statically visible callee bodies"
+            ;;
+        valid_objc_hw_kernel_extern_call.m)
+            EXPECTED_DIAG="closed-world 0-DSP verification requires statically visible callee bodies"
+            ;;
         valid_objc_unsealed_inheritance.m)
             EXPECTED_DIAG="Polymorphic class"
             ;;

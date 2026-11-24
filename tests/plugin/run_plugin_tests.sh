@@ -333,6 +333,10 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="Escaping data-stack reference"
     elif [[ "$base_name" == test_banned_use_after_move_field_alias* ]]; then
         EXPECTED_MSG="Use of consumed linear variable"
+    elif [[ "$base_name" == test_banned_hw_kernel_fnptr_call* ]]; then
+        EXPECTED_MSG="closed-world 0-DSP verification requires statically visible callee bodies"
+    elif [[ "$base_name" == test_banned_hw_kernel_extern_call* ]]; then
+        EXPECTED_MSG="closed-world 0-DSP verification requires statically visible callee bodies"
     elif [[ "$base_name" == test_banned_isystem_c99_in_nolatency* ]]; then
         EXPECTED_MSG="defaults to @cold and cannot be called from a @nolatency context"
     fi
@@ -405,6 +409,24 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
             for req_tok in "qty_alias" "env" "buf_alias" "holder.buf"; do
                 if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
                     echo "[FAIL] Missing expected field-alias use-after-move token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
+        if [[ "$base_name" == test_banned_hw_kernel_fnptr_call* ]]; then
+            for req_tok in "illegal_hw_kernel_direct_fnptr" "illegal_hw_kernel_transitive_fnptr" "helper_dispatch_indirect"; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing expected 0-DSP fnptr rejection token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
+        if [[ "$base_name" == test_banned_hw_kernel_extern_call* ]]; then
+            for req_tok in "illegal_hw_kernel_direct_extern" "illegal_hw_kernel_transitive_extern" "external_opaque_dsp_mac"; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing expected 0-DSP extern rejection token '$req_tok' in $base_name!"
                     echo "$OUTPUT"
                     exit 1
                 fi
