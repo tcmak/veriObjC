@@ -34,7 +34,8 @@ if ! command -v "clang-$LLVM_VERSION" >/dev/null 2>&1; then
     "clang-$LLVM_VERSION" \
     "llvm-$LLVM_VERSION" \
     "llvm-$LLVM_VERSION-dev" \
-    "libclang-cpp-$LLVM_VERSION-dev"
+    "libclang-$LLVM_VERSION-dev" \
+    "libclang-cpp${LLVM_VERSION}-dev"
 fi
 
 if [ "$SKIP_CPPUTEST" -eq 1 ]; then
