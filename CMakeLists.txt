@@ -313,3 +313,8 @@ add_test(NAME vstd_cohesion_tests
 add_test(NAME e2e_sealed_polymorphism_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_e2e_sealed_polymorphism_test.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}
 )
+
+# Test target for End-to-End SDK Install & veriobjc-cc Driver Gate (Task 6.0.1)
+add_test(NAME veriobjc_cc_sdk_tests
+    COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/integration/run_veriobjc_cc_sdk_test.sh ${CMAKE_BINARY_DIR} ${CMAKE_CURRENT_SOURCE_DIR}
+)
