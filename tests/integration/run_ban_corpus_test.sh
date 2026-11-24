@@ -87,6 +87,12 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_escape_via_out_param.m)
             EXPECTED_DIAG="Escaping data-stack reference"
             ;;
+        valid_objc_escape_via_helper_global.m)
+            EXPECTED_DIAG="Escaping data-stack reference"
+            ;;
+        valid_objc_use_after_move_field_alias.m)
+            EXPECTED_DIAG="Use of consumed linear variable"
+            ;;
         valid_objc_unsealed_inheritance.m)
             EXPECTED_DIAG="Polymorphic class"
             ;;

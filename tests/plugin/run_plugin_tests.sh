@@ -329,6 +329,10 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="@cold function 'veriobjc_host_load_file_staged' cannot be called from non-@cold function"
     elif [[ "$base_name" == test_banned_escape_via_pointee_field* ]]; then
         EXPECTED_MSG="Escaping data-stack reference 'stack_wire_bytes'"
+    elif [[ "$base_name" == test_banned_escape_via_helper_global* ]]; then
+        EXPECTED_MSG="Escaping data-stack reference"
+    elif [[ "$base_name" == test_banned_use_after_move_field_alias* ]]; then
+        EXPECTED_MSG="Use of consumed linear variable"
     elif [[ "$base_name" == test_banned_isystem_c99_in_nolatency* ]]; then
         EXPECTED_MSG="defaults to @cold and cannot be called from a @nolatency context"
     fi
@@ -383,6 +387,24 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
             for req_tok in "synth_c99_external_audit_crc" "Banned computation macro"; do
                 if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
                     echo "[FAIL] Missing expected diagnostic token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
+        if [[ "$base_name" == test_banned_escape_via_helper_global* ]]; then
+            for req_tok in "illegal_escape_via_helper_global_chain" "g_escaped_cursor" "illegal_escape_via_helper_out_param" "outer_box" "caller_out"; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing expected helper-sink escape token '$req_tok' in $base_name!"
+                    echo "$OUTPUT"
+                    exit 1
+                fi
+            done
+        fi
+        if [[ "$base_name" == test_banned_use_after_move_field_alias* ]]; then
+            for req_tok in "qty_alias" "env" "buf_alias" "holder.buf"; do
+                if ! echo "$OUTPUT" | grep -qF "$req_tok"; then
+                    echo "[FAIL] Missing expected field-alias use-after-move token '$req_tok' in $base_name!"
                     echo "$OUTPUT"
                     exit 1
                 fi
