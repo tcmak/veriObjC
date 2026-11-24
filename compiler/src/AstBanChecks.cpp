@@ -1193,6 +1193,80 @@ bool VeriObjCVisitor::VisitRecordDecl(RecordDecl *D) {
     return true;
 }
 
+bool VeriObjCVisitor::VisitCastExpr(CastExpr *CE) {
+    if (!CE) return true;
+    const SourceManager &SM = Context->getSourceManager();
+    SourceLocation ExpLoc = SM.getExpansionLoc(CE->getExprLoc());
+    if (isInRuntimeHeader(ExpLoc) || SM.isInSystemHeader(ExpLoc)) {
+        return true;
+    }
+
+    const auto *DstOPT = CE->getType()->getAs<ObjCObjectPointerType>();
+    if (!DstOPT) return true;
+    const ObjCInterfaceDecl *DstID = DstOPT->getInterfaceDecl();
+    if (!DstID || (!isSealedClass(DstID) && !isFinalClass(DstID))) {
+        return true;
+    }
+
+    const Expr *Sub = CE->getSubExpr();
+    if (!Sub) return true;
+    const Expr *DirectSub = Sub->IgnoreParens();
+
+    // Avoid duplicate diagnostics when an ImplicitCastExpr wraps an ExplicitCastExpr to ObjC ptr
+    if (isa<ImplicitCastExpr>(CE) && isa<ExplicitCastExpr>(DirectSub)) {
+        if (const auto *InnerOPT = DirectSub->getType()->getAs<ObjCObjectPointerType>();
+            InnerOPT && InnerOPT->getInterfaceDecl()) {
+            return true;
+        }
+    }
+
+    // (1) Same nominal class or valid derived-to-base Objective-C upcast (Sub * -> Base *)
+    if (const auto *SrcOPT = DirectSub->getType()->getAs<ObjCObjectPointerType>()) {
+        if (const ObjCInterfaceDecl *SrcID = SrcOPT->getInterfaceDecl()) {
+            if (DstID->getCanonicalDecl() == SrcID->getCanonicalDecl() ||
+                DstID->isSuperClassOf(SrcID)) {
+                return true;
+            }
+        }
+    }
+
+    // (2) Null pointer constants (NULL / nullptr / 0 / (void *)0)
+    if (Sub->isNullPointerConstant(*Context, Expr::NPC_ValueDependentIsNull) != Expr::NPCK_NotNull) {
+        return true;
+    }
+
+    // (3) Direct veriobjc_sealed_alloc(...) constructor call from veriobjc_alloc_sealed(Cls, stack_ptr)
+    if (const auto *SubCE = dyn_cast<CallExpr>(Sub->IgnoreParenImpCasts())) {
+        if (const FunctionDecl *Callee = SubCE->getDirectCallee();
+            Callee && Callee->getName() == "veriobjc_sealed_alloc" && SubCE->getNumArgs() >= 3) {
+            bool SizeMatchesClass = true;
+            if (const auto *UETT = dyn_cast<UnaryExprOrTypeTraitExpr>(SubCE->getArg(1)->IgnoreParenImpCasts());
+                UETT && UETT->getKind() == UETT_SizeOf && UETT->isArgumentType()) {
+                if (const auto *SizeObjTy = UETT->getArgumentType()->getAs<ObjCObjectType>()) {
+                    if (const ObjCInterfaceDecl *SizeID = SizeObjTy->getInterface()) {
+                        SizeMatchesClass = (SizeID->getCanonicalDecl() == DstID->getCanonicalDecl());
+                    } else {
+                        SizeMatchesClass = false;
+                    }
+                } else {
+                    SizeMatchesClass = false;
+                }
+            }
+            if (SizeMatchesClass) {
+                return true;
+            }
+        }
+    }
+
+    unsigned Line = SM.getSpellingLineNumber(ExpLoc);
+    unsigned Col = SM.getSpellingColumnNumber(ExpLoc);
+    reportError(
+        ExpLoc,
+        "VeriObjC Violation: Banned raw or unchecked pointer cast to @sealed/@final class '%0' from '%1' at %2:%3; allocate tagged instances via 'veriobjc_alloc_sealed(%0, stack)'."
+    ) << DstID->getName() << DirectSub->getType().getAsString() << Line << Col;
+    return true;
+}
+
 bool VeriObjCVisitor::VisitCallExpr(CallExpr *E) {
     const FunctionDecl *FD = E->getDirectCallee();
     if (!FD) return true;

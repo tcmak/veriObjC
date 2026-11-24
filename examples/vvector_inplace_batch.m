@@ -4,6 +4,7 @@
 //   - AST-checked VVector_decl / VVector(T, N) C11 macro containers with arbitrary capacities N (N = 4, N = 8)
 //   - Built-in-place slot construction via vvector_push_inplace
 #include "veriobjc_runtime.h"
+#include "rt/dispatch.h"
 #include "vstd/vector.h"
 
 __attribute__((annotate("objc_sealed")))
@@ -55,21 +56,26 @@ int32_t evaluate_generic_order_batch(
     return generic_sum;
 }
 
-int32_t run_vvector_batch_demo(void) {
-    struct {
-        uint32_t item_tag;
-        int32_t qty;
-    } raw0 = {1u, 25}, raw1 = {2u, 25};
-    struct {
-        uint32_t count;
-        uint32_t cap;
-        OrderBatchItem *buf[VVECTOR_GENERIC_CAPACITY];
-    } obj_storage;
+typedef VVector<OrderBatchItem *> OrderBatchObjVec;
 
-    OrderBatchVec8 by_val_vec = build_order_batch_by_value(
-        (OrderBatchItem *)&raw0,
-        (OrderBatchItem *)&raw1
-    );
+int32_t run_vvector_batch_demo(void) {
+    _Alignas(8) uint8_t arena_backing[256];
+    struct veriobjc_stack arena;
+    veriobjc_stack_init(&arena, arena_backing, sizeof(arena_backing));
+    VERIOBJC_SCOPED_STACK(&arena);
+
+    OrderBatchItem *item0 = veriobjc_alloc_sealed(OrderBatchItem, &arena);
+    OrderBatchItem *item1 = veriobjc_alloc_sealed(OrderBatchItem, &arena);
+    OrderBatchObjVec *obj_vec = veriobjc_alloc_sealed(OrderBatchObjVec, &arena);
+    if (!item0 || !item1 || !obj_vec) {
+        return 0;
+    }
+    item0->item_tag = 1u;
+    item0->qty      = 25;
+    item1->item_tag = 2u;
+    item1->qty      = 25;
+
+    OrderBatchVec8 by_val_vec = build_order_batch_by_value(item0, item1);
     OrderBatchItem **first_slot = vvector_at(&by_val_vec, 0u);
     OrderBatchItem **second_slot = vvector_at(&by_val_vec, 1u);
     if (!first_slot || !second_slot || vvector_cap(&by_val_vec) != 8u) {
@@ -77,7 +83,7 @@ int32_t run_vvector_batch_demo(void) {
     }
 
     int32_t generic_sum = evaluate_generic_order_batch(
-        (VVector<OrderBatchItem *> *)&obj_storage,
+        obj_vec,
         *first_slot,
         *second_slot
     );

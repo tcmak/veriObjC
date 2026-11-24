@@ -29,6 +29,7 @@ Two artifacts, both CI gates:
 | Runtime thread spawn (`NSThread`, `dispatch_async`, GCD) | Yes | "Banned runtime scheduling on constrained paths" | Static topology; `vasync` fixed DAGs (`@cold`-only escape) | `test_banned_runtime_spawn.m` ✓ |
 | `@try` / `@catch` / `@finally` (unwinding) | Yes | "Banned exception unwinding" | `return err from f` (hidden flag, no unwinder) | `test_banned_try_catch.m` ✓ |
 | Open-world class inheritance without `@sealed` | Yes | "Polymorphic class" | `__attribute__((objc_sealed))` + `__attribute__((objc_final))` | `test_banned_unsealed_inheritance.m`, `valid_objc_unsealed_inheritance.m` ✓ |
+| Raw or unchecked pointer cast to `@sealed` / `@final` class (forging untagged header) | Yes | "Banned raw or unchecked pointer cast to @sealed/@final class" | `veriobjc_alloc_sealed(Cls, stack)` + derived-to-base upcasts | `test_banned_raw_cast_to_sealed.m`, `valid_objc_raw_cast_to_sealed.m` ✓ |
 
 ### B. Memory & Ownership
 

@@ -119,14 +119,14 @@ Full runnable examples in [`examples/`](examples/) include `@sealed` mixed-size 
 
 ## 🚫 What Gets Banned (and How You Know)
 
-VeriObjC's design lives in its *impossible list*: 30+ constructs rejected at compile time, each with a named diagnostic and a dedicated test — **a ban that isn't tested isn't a ban**.
+VeriObjC's design lives in its *impossible list*: 54 constructs rejected at compile time, each with a named diagnostic and a dedicated test — **a ban that isn't tested isn't a ban**.
 
 | Category | Count | Highlights |
 | :--- | :--- | :--- |
-| Dynamic runtime | 13 | `id`, `NSObject`, categories, KVC/KVO, swizzling, nil messaging, GCD spawns, `@try`/`@catch` |
-| Memory & ownership | 8 | Escaping data-stack refs, FFI stack-ref export, non-flat channel payloads, allocator mixing, heap in `@nolatency` |
-| Metaprogramming & attributes | 8 | Unconstrained generics, SFINAE-style probing, un-fueled compile-time evaluation, unrecognized `annotate("veriobjc_*")` spellings |
-| Hardware streams | 2 | Width-mismatched `zip`, context overflow beyond declared `ContextCap` |
+| Dynamic & nominal dispatch | 15 | `id`, `NSObject`, categories, KVC/KVO, swizzling, nil messaging, GCD spawns, `@try`/`@catch`, unsealed inheritance, raw casts to `@sealed`/`@final` |
+| Memory & ownership | 23 | Escaping data-stack refs (incl. helper sinks), use-after-move (incl. struct/field aliases), FFI stack-ref export, non-flat channel payloads, allocator mixing, heap in `@nolatency` |
+| Metaprogramming & attributes | 12 | Unconstrained generics, SFINAE-style probing, un-fueled `vconstexpr`, non-exhaustive `vmatch`, Z3 `QF_BV` contract counterexamples, unrecognized `annotate("veriobjc_*")` spellings |
+| Hardware streams & 0-DSP | 4 | Width-mismatched `zip`, `ContextCap` overflow, direct/transitive runtime multiply/divide or opaque indirect/`extern` calls in `objc_hw_kernel` |
 
 The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated in CI: every file must compile `-Werror` clean under stock Clang *and* be rejected by the plugin with the exact named diagnostic. A file that isn't valid Objective-C proves nothing.
 
@@ -149,7 +149,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | **Phase 3** (`vstd/`, `sys0/`, `hw/`, `<vstd/contracts.h>`, `<vstd/simd.h>`, `<vstd/io.h>`, header-closure & minimal-binary cohesion gate) | ✅ Implemented — verified by `unit_rt_tests`, `plugin_tests`, `ban_corpus_tests`, and `vstd_cohesion_tests` |
 | **Phase 4** (cycle benchmark harness, survivor report diff engine, latency budget gate, Z3 `QF_BV` SMT contract verification) | ✅ Implemented — bench harness, survivor diff, latency gate, and real `z3 -smt2 -in` `QF_BV` contract discharge (`--smt-verify`, `--smt-report`, `--smt-timeout-ms`, `--z3-path`) pass unit and plugin tests (`TestSmtContractBridge.cpp`, `test_valid_smt_z3_proof.m`, `test_banned_smt_z3_counterexample.m`) |
 | **Phase 5** (examples smoke suite, end-to-end freestanding `@sealed` polymorphism & mixed-size `vspan` scope composition without `-lobjc`, `VOBJ` snapshot persistence, pure-CPU ternary fallback, transitive ternary zero-multiplication check) | ✅ Implemented — Tasks 5.1–5.3, Task 5.5 mixed-size `@sealed` upcast dispatch + single-store scope reset + escape policing (`e2e_sealed_polymorphism_tests`, `examples/sealed_mixed_scope.m`), `VOBJ` v1 golden corpus (`fixtures/vobj_v1/`), and pure-CPU round-half-up ternary fallback (`<vstd/ternary.h>`) pass *(Task 5.4 RTL synthesis/co-sim is out of scope for standalone `veriObjC`)* |
-| **Phase 6** (`veriobjc-cc` SDK driver, `vosh` scripting runner & `vpm` package manager) | 🟡 In Progress — **Block 6.0 complete (`6.0.1`–`6.0.6`)**: `cmake --install` relocatable SDK & `veriobjc-cc` driver (`veriobjc_cc_sdk_tests`), `.objc_*` COMDAT guard, `libveriobjc_rt.a` archive hygiene, unknown `annotate(...)` rejection, `@cold` static staging file loader (`<veriobjc_host_io.h>`), and `-isystem` C99 interop (`7/7` CTest suites passing); `vosh` and `vpm` next |
+| **Phase 6** (`veriobjc-cc` SDK driver, `vosh` scripting runner & `vpm` package manager) | 🟡 In Progress — **Block 6.0 complete (`6.0.1`–`6.0.10`)**: `cmake --install` relocatable SDK & `veriobjc-cc` driver (`veriobjc_cc_sdk_tests`), `.objc_*` COMDAT guard, `libveriobjc_rt.a` archive hygiene, unknown `annotate(...)` rejection, `@cold` static staging file loader (`<veriobjc_host_io.h>`), `-isystem` C99 interop, deterministic `check_vstd_cohesion.sh` gate, transitive helper-sink & field-alias CFG checks, fail-closed `objc_hw_kernel` 0-DSP call graph, and `@sealed`/`@final` raw-cast ban (`7/7` CTest suites passing); `vosh` and `vpm` next |
 | **Toolchain** | Clang / LLVM 23.1.5, Z3 ≥ 4.8.12 (compile-time host verifier), CppUTest, CMake |
 | **Production usage** | None. This is a research bet that the *impossible list* is worth the closed world. |
 
@@ -161,7 +161,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | :--- | :--- |
 | [`docs/veriobjc-specification.md`](docs/veriobjc-specification.md) | Architectural specification: pipeline, memory model, syntax inventions |
 | [`docs/veriobjc-poc-execution-plan.md`](docs/veriobjc-poc-execution-plan.md) | PoC execution plan, language decision record, acceptance criteria |
-| [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) | Ban Registry (30+ bans, diagnostics, tests) + rejection corpus rules |
+| [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) | Ban Registry (54 bans, diagnostics, tests) + rejection corpus rules |
 | [`docs/veriobjc-foundational-library.md`](docs/veriobjc-foundational-library.md) | `vstd` design: strings, stacks, variants, channels, atomics, FFI matrix |
 | [`docs/veriobjc-advanced-substrate.md`](docs/veriobjc-advanced-substrate.md) | vmeta metaprogramming, vregex, `veriStream` fixed-point streaming substrate |
 | [`docs/veriobjc-type-system-and-metaprogramming-vmeta.md`](docs/veriobjc-type-system-and-metaprogramming-vmeta.md) | Nominal local type inference (`auto`), constrained `vgeneric`, `vconstexpr`, `vregex` |

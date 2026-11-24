@@ -101,6 +101,7 @@ Every file in `examples/banned/` is **100% valid, idiomatic stock Objective-C** 
 | [`valid_objc_use_after_move_field_alias.m`](./banned/valid_objc_use_after_move_field_alias.m) | Task 6.0.8: Reading through `&pkt.qty` after consuming `pkt` via `veriobjc_move(pkt)` | `"Use of consumed linear variable"` | Finish borrowing struct/field aliases before moving the owning struct or field |
 | [`valid_objc_hw_kernel_fnptr_call.m`](./banned/valid_objc_hw_kernel_fnptr_call.m) | Task 6.0.9: Indirect function-pointer call inside an `objc_hw_kernel` hiding unproven DSP ops | `"closed-world 0-DSP verification requires statically visible callee bodies"` | Replace indirect calls with direct functions or `@sealed` methods with statically visible bodies |
 | [`valid_objc_hw_kernel_extern_call.m`](./banned/valid_objc_hw_kernel_extern_call.m) | Task 6.0.9: Calling a bodyless `extern` function from an `objc_hw_kernel` | `"closed-world 0-DSP verification requires statically visible callee bodies"` | Provide `static inline` / in-TU definitions or `vconstexpr` compile-time constants for all `objc_hw_kernel` callees |
+| [`valid_objc_raw_cast_to_sealed.m`](./banned/valid_objc_raw_cast_to_sealed.m) | Task 6.0.10: Forging a `@sealed` / `@final` object pointer by casting a raw byte buffer (`(RawCastSealedStage *)raw_storage`) without `veriobjc_sealed_header` | `"Banned raw or unchecked pointer cast to @sealed/@final class"` | Construct `@sealed` / `@final` objects exclusively via `veriobjc_alloc_sealed(Cls, stack)` |
 
 ---
 

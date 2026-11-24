@@ -244,8 +244,8 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 ## 🧰 Phase 6: SDK Driver (veriobjc-cc), Scripting (vosh) & Package Manager (vpm)
 *(Mapped to: `docs/veriobjc-poc-execution-plan.md` §0)*
 
-### Block 6.0 — SDK Packaging, `veriobjc-cc` Driver & C99 Interop Hardening
-Real-world external consumer dogfooding exposed six usability and backend sharp edges that must be closed before `vosh` builds on top of the SDK:
+### Block 6.0 — SDK Packaging, `veriobjc-cc` Driver, C99 Interop & Soundness Hardening
+Real-world external consumer dogfooding and soundness audits surfaced ten usability, CI determinism, and verification sharp edges closed before `vosh` builds on top of the SDK:
 
 - [x] **6.0.1 `cmake --install` SDK Layout & `veriobjc-cc` Compiler Wrapper (`CMakeLists.txt`, `tools/veriobjc-cc.in`, `scripts/install.sh`, `BUILDING.md`):**
   Installed a self-contained, relocatable prefix (`bin/veriobjc-cc`, `lib/veriobjc/libVeriObjCPlugin.so`, `lib/veriobjc/libveriobjc_rt.a`, `include/veriobjc/{rt,vstd,sys0,hw,host}`) alongside build-tree `build/bin/veriobjc-cc`. `veriobjc-cc` injects `-std=gnu23 -fblocks`, `-Xclang -load/-add-plugin veriobjc-check`, `-fpass-plugin` (omitted in `-E`/`-fsyntax-only` modes for `-Werror` cleanliness), and `-I` SDK headers (preserving user-site macro diagnostics), links `libveriobjc_rt.a` automatically when producing executables, forwards `--smt-*`/`--effects-report`/`--branch-report`/`--mono-report`/`--export-header-stdout`, and rejects `-fobjc-runtime=gnustep*` with an actionable error (`veriobjc_cc_sdk_tests`).
@@ -265,8 +265,8 @@ Real-world external consumer dogfooding exposed six usability and backend sharp 
   Extended interprocedural helper parameter summaries (`HelperParamSummary`) to track global and out-parameter escape sinks transitively across helper call chains (`test_banned_escape_via_helper_global.m`, `valid_objc_escape_via_helper_global.m`), and tracked `LinearTarget` (`(RootVD, FieldDecl*)`) alias provenance + `MemberExpr` move invalidation so reading through `&s` / `&s.field` after moving `s` or `s.field` fails closed (`test_banned_use_after_move_field_alias.m`, `valid_objc_use_after_move_field_alias.m`).
 - [x] **6.0.9 Fail-Closed Zero-DSP Hardware Kernel Call Graph (`compiler/src/CfgDataflowChecks.cpp`):**
   Rejected indirect calls (function pointers / blocks) and bodyless non-`objc_vconstexpr` `extern` callees reachable directly or transitively from any `objc_hw_kernel` (`test_banned_hw_kernel_fnptr_call.m`, `test_banned_hw_kernel_extern_call.m`, `valid_objc_hw_kernel_fnptr_call.m`, `valid_objc_hw_kernel_extern_call.m`).
-- [ ] **6.0.10 Ban Raw Pointer Casts to `@sealed` / `@final` Classes (`compiler/src/AstBanChecks.cpp`):**
-  Forbid forging untagged `@sealed` / `@final` object pointers via raw pointer casts outside `veriobjc_alloc_sealed` (allowing only `veriobjc_sealed_alloc`, valid derived-to-base Objective-C upcasts, and null pointer constants) so `veriobjc_sealed_tag(obj)` never reads out-of-bounds memory behind raw buffers (`test_banned_raw_cast_to_sealed.m`, `valid_objc_raw_cast_to_sealed.m`).
+- [x] **6.0.10 Ban Raw Pointer Casts to `@sealed` / `@final` Classes (`compiler/src/AstBanChecks.cpp`):**
+  Banned forging untagged `@sealed` / `@final` object pointers via raw pointer casts or unchecked downcasts outside `veriobjc_alloc_sealed` (allowing only `veriobjc_sealed_alloc` with matching `sizeof(Cls)`, valid derived-to-base Objective-C upcasts, and null pointer constants) so `veriobjc_sealed_tag(obj)` never reads out-of-bounds memory behind raw buffers (`test_banned_raw_cast_to_sealed.m`, `valid_objc_raw_cast_to_sealed.m`, `examples/vvector_inplace_batch.m`).
 - [ ] **Task 6.0: `vosh` — Self-Hosted Zero-Boilerplate Scripting & Verification Runner (`tools/vosh/`)**
   - Written in **VeriObjC itself** (compiled in Stage 2 of CMake using `clang-23` + `libVeriObjCPlugin.so`, audited with `--effects-report` proving 0 allocations/syscalls outside `vosh_os_posix.m` `@cold @io` quarantine).
   - Supports `#!/usr/bin/env vosh` shebang execution, `#line`-preserving top-level snippet wrapping (pre-wired `VERIOBJC_SCOPED_STACK` scratch arena), and FNV-1a-64 content-addressed binary caching (`~/.cache/vosh/`) for millisecond re-runs.

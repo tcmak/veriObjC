@@ -138,11 +138,11 @@ private:
         llvm::StringRef File = Context->getSourceManager().getFilename(Loc);
         return File.ends_with("veriobjc_runtime.h") ||
                File.contains("/include/veriobjc/") ||
-               File.contains("/rt/include/") ||
-               File.contains("/vstd/include/") ||
-               File.contains("/sys0/include/") ||
-               File.contains("/hw/include/") ||
-               File.contains("/host/include/");
+               File.contains("/rt/include/") || File.starts_with("rt/include/") ||
+               File.contains("/vstd/include/") || File.starts_with("vstd/include/") ||
+               File.contains("/sys0/include/") || File.starts_with("sys0/include/") ||
+               File.contains("/hw/include/") || File.starts_with("hw/include/") ||
+               File.contains("/host/include/") || File.starts_with("host/include/");
     }
 
     clang::DeclRefExpr *buildDeclRef(clang::ValueDecl *VD, clang::SourceLocation Loc) {
@@ -405,6 +405,7 @@ public:
     bool VisitTypedefNameDecl(clang::TypedefNameDecl *D);
     bool VisitRecordDecl(clang::RecordDecl *D);
     bool VisitObjCInterfaceDecl(clang::ObjCInterfaceDecl *D);
+    bool VisitCastExpr(clang::CastExpr *CE);
     bool VisitCallExpr(clang::CallExpr *E);
     bool VisitObjCMessageExpr(clang::ObjCMessageExpr *E);
 };
