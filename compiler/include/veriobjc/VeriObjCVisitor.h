@@ -93,6 +93,12 @@ private:
         clang::SourceLocation Loc;
     };
 
+    struct HelperParamSummary {
+        llvm::SmallVector<unsigned, 4> ReturnedParams;
+        std::vector<std::pair<unsigned, std::string>> GlobalSinks;
+        llvm::SmallVector<std::pair<unsigned, unsigned>, 4> OutParamSinks;
+    };
+
     clang::ASTContext *Context;
     VeriObjCPluginOptions Opts;
     llvm::StringMap<clang::FunctionDecl *> DirectMethodDecls;
@@ -102,7 +108,7 @@ private:
     llvm::DenseMap<const clang::Decl *, std::vector<DspOpSite>> DirectDspOps;
     llvm::DenseMap<const clang::Decl *, llvm::SmallVector<std::pair<const clang::Decl *, clang::SourceLocation>, 4>> DspCallEdges;
     std::vector<HwKernelRecord> HwKernels;
-    llvm::DenseMap<const clang::FunctionDecl *, llvm::SmallVector<unsigned, 4>> ForwardedParamSummaryCache;
+    llvm::DenseMap<const clang::FunctionDecl *, HelperParamSummary> HelperSummaryCache;
     llvm::DenseMap<const clang::VarDecl *, clang::FunctionDecl *> MonomorphizedBlocks;
     llvm::DenseMap<const clang::VarDecl *, llvm::SmallVector<clang::VarDecl *, 4>> BlockCapturedVars;
     llvm::StringMap<clang::FunctionDecl *> DedupBlockDecls;
@@ -315,7 +321,7 @@ private:
     // -----------------------------------------------------------------------
     static bool isStackAllocExpr(const clang::Expr *E);
     bool canTypeCarryStackReference(clang::QualType T) const;
-    llvm::SmallVector<unsigned, 4> getForwardedParamIndices(
+    HelperParamSummary getHelperParamSummary(
         const clang::FunctionDecl *FD,
         llvm::DenseSet<const clang::FunctionDecl *> &Visiting
     );

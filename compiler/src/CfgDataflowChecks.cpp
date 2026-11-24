@@ -44,11 +44,76 @@ StackProv joinStackProv(const StackProv &A, const StackProv &B) {
     return A;
 }
 
+struct LinearTarget {
+    const VarDecl *RootVD = nullptr;
+    const FieldDecl *Field = nullptr; // nullptr = whole variable; non-null = specific member
+
+    bool operator<(const LinearTarget &O) const {
+        if (RootVD != O.RootVD) return RootVD < O.RootVD;
+        return Field < O.Field;
+    }
+    bool operator==(const LinearTarget &O) const {
+        return RootVD == O.RootVD && Field == O.Field;
+    }
+};
+
+std::string formatLinearTargetName(const LinearTarget &T) {
+    if (!T.RootVD) return "<unknown>";
+    if (!T.Field) return T.RootVD->getNameAsString();
+    return T.RootVD->getNameAsString() + "." + T.Field->getNameAsString();
+}
+
+LinearTarget extractLinearTarget(const Expr *E) {
+    if (!E) return {};
+    const Expr *Cur = E->IgnoreParenCasts();
+    if (const auto *UO = dyn_cast<UnaryOperator>(Cur); UO && UO->getOpcode() == UO_AddrOf) {
+        Cur = UO->getSubExpr()->IgnoreParenCasts();
+    }
+    if (const auto *DRE = dyn_cast<DeclRefExpr>(Cur)) {
+        if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+            return { VD, nullptr };
+        }
+        return {};
+    }
+    if (const auto *ME = dyn_cast<MemberExpr>(Cur)) {
+        const auto *FD = dyn_cast<FieldDecl>(ME->getMemberDecl());
+        const Expr *Base = ME->getBase()->IgnoreParenCasts();
+        while (Base) {
+            if (const auto *AddrUO = dyn_cast<UnaryOperator>(Base);
+                AddrUO && (AddrUO->getOpcode() == UO_AddrOf || AddrUO->getOpcode() == UO_Deref)) {
+                Base = AddrUO->getSubExpr()->IgnoreParenCasts();
+                continue;
+            }
+            if (const auto *SubME = dyn_cast<MemberExpr>(Base)) {
+                Base = SubME->getBase()->IgnoreParenCasts();
+                continue;
+            }
+            if (const auto *DRE = dyn_cast<DeclRefExpr>(Base)) {
+                if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
+                    return { VD, FD };
+                }
+            }
+            break;
+        }
+    }
+    return {};
+}
+
+void collectSubtreeStmts(const Stmt *S, llvm::DenseSet<const Stmt *> &Out) {
+    if (!S) return;
+    Out.insert(S);
+    for (const Stmt *Child : S->children()) {
+        collectSubtreeStmts(Child, Out);
+    }
+}
+
 struct CFGDataflowState {
     bool Initialized = false;
     llvm::DenseMap<const VarDecl *, LinearValState> Linear;
+    std::map<LinearTarget, LinearValState> FieldLinear;
     llvm::DenseMap<const VarDecl *, LinearValState> PoolFreed;
     std::map<const VarDecl *, std::set<const VarDecl *>> AliasRoots;
+    std::map<const VarDecl *, std::set<LinearTarget>> AliasTargets;
     llvm::DenseMap<const VarDecl *, StackProv> Prov;
     llvm::DenseMap<const VarDecl *, StackProv> PointeeProv;
 };
@@ -69,6 +134,15 @@ bool joinCFGState(CFGDataflowState &Dst, const CFGDataflowState &Src) {
             Changed = true;
         }
     }
+    for (const auto &[Tgt, SrcFSt] : Src.FieldLinear) {
+        auto It = Dst.FieldLinear.find(Tgt);
+        LinearValState Old = (It != Dst.FieldLinear.end()) ? It->second : LinearValState::Unreached;
+        LinearValState Joined = joinLinearState(Old, SrcFSt);
+        if (Joined != Old) {
+            Dst.FieldLinear[Tgt] = Joined;
+            Changed = true;
+        }
+    }
     for (const auto &[VD, SrcFr] : Src.PoolFreed) {
         LinearValState Old = Dst.PoolFreed.lookup(VD);
         LinearValState Joined = joinLinearState(Old, SrcFr);
@@ -81,6 +155,14 @@ bool joinCFGState(CFGDataflowState &Dst, const CFGDataflowState &Src) {
         std::set<const VarDecl *> &DstRoots = Dst.AliasRoots[VD];
         for (const VarDecl *R : Roots) {
             if (DstRoots.insert(R).second) {
+                Changed = true;
+            }
+        }
+    }
+    for (const auto &[VD, Tgts] : Src.AliasTargets) {
+        std::set<LinearTarget> &DstTgts = Dst.AliasTargets[VD];
+        for (const LinearTarget &T : Tgts) {
+            if (DstTgts.insert(T).second) {
                 Changed = true;
             }
         }
@@ -196,40 +278,40 @@ bool VeriObjCVisitor::canTypeCarryStackReference(QualType T) const {
     return findNonFlatField(T) != nullptr;
 }
 
-llvm::SmallVector<unsigned, 4> VeriObjCVisitor::getForwardedParamIndices(
+VeriObjCVisitor::HelperParamSummary VeriObjCVisitor::getHelperParamSummary(
     const FunctionDecl *FD,
     llvm::DenseSet<const FunctionDecl *> &Visiting
 ) {
-    llvm::SmallVector<unsigned, 4> Result;
-    if (!FD) return Result;
+    HelperParamSummary Summary;
+    if (!FD) return Summary;
     const FunctionDecl *CanonFD = FD->getCanonicalDecl();
-    if (auto It = ForwardedParamSummaryCache.find(CanonFD); It != ForwardedParamSummaryCache.end()) {
+    if (auto It = HelperSummaryCache.find(CanonFD); It != HelperSummaryCache.end()) {
         return It->second;
-    }
-    if (!canTypeCarryStackReference(FD->getReturnType())) {
-        ForwardedParamSummaryCache[CanonFD] = Result;
-        return Result;
     }
 
     const FunctionDecl *DefFD = FD->getDefinition();
     if (!DefFD || !DefFD->hasBody()) {
-        // Runtime/vstd header view/span constructors forward pointer-bearing arguments
         if (isInRuntimeHeader(FD->getLocation())) {
-            for (unsigned i = 0; i < FD->getNumParams(); ++i) {
-                if (canTypeCarryStackReference(FD->getParamDecl(i)->getType())) {
-                    Result.push_back(i);
+            if (canTypeCarryStackReference(FD->getReturnType())) {
+                for (unsigned i = 0; i < FD->getNumParams(); ++i) {
+                    if (canTypeCarryStackReference(FD->getParamDecl(i)->getType())) {
+                        Summary.ReturnedParams.push_back(i);
+                    }
                 }
             }
+            if (FD->getName() == "__vspan_init_raw" && FD->getNumParams() >= 3) {
+                Summary.OutParamSinks.push_back({ 2u, 0u });
+            }
         }
-        ForwardedParamSummaryCache[CanonFD] = Result;
-        return Result;
+        HelperSummaryCache[CanonFD] = Summary;
+        return Summary;
     }
 
     if (!Visiting.insert(CanonFD).second) {
-        return Result;
+        return Summary;
     }
 
-    // Track local aliases inside helper body from parameters -> local vars -> return exprs
+    // Track local aliases inside helper body from parameters -> local vars -> return/global/out-param sinks
     std::map<const VarDecl *, std::set<unsigned>> VarParamTaint;
     for (unsigned i = 0; i < DefFD->getNumParams(); ++i) {
         if (canTypeCarryStackReference(DefFD->getParamDecl(i)->getType())) {
@@ -299,8 +381,8 @@ llvm::SmallVector<unsigned, 4> VeriObjCVisitor::getForwardedParamIndices(
         }
         if (const auto *CE = dyn_cast<CallExpr>(E)) {
             if (const FunctionDecl *Callee = CE->getDirectCallee()) {
-                auto Fwd = getForwardedParamIndices(Callee, Visiting);
-                for (unsigned Idx : Fwd) {
+                HelperParamSummary Sub = getHelperParamSummary(Callee, Visiting);
+                for (unsigned Idx : Sub.ReturnedParams) {
                     if (Idx < CE->getNumArgs()) {
                         self(self, CE->getArg(Idx), Out);
                     }
@@ -311,6 +393,32 @@ llvm::SmallVector<unsigned, 4> VeriObjCVisitor::getForwardedParamIndices(
     };
 
     std::set<unsigned> ReturnedParams;
+    std::set<std::pair<unsigned, std::string>> GlobalSinks;
+    std::set<std::pair<unsigned, unsigned>> OutParamSinks;
+
+    auto recordSinkFromLHS = [&](const Expr *LhsExpr, const std::set<unsigned> &RhsTaint) {
+        if (!LhsExpr || RhsTaint.empty()) return;
+        SinkBaseInfo Sink = inspectAssignmentLHS(LhsExpr);
+        if (!Sink.BaseVD) return;
+        if (Sink.BaseVD->hasGlobalStorage()) {
+            for (unsigned Idx : RhsTaint) {
+                GlobalSinks.emplace(Idx, Sink.BaseVD->getNameAsString());
+            }
+        } else if (Sink.DereferencedPointer) {
+            if (auto DstIt = VarParamTaint.find(Sink.BaseVD); DstIt != VarParamTaint.end()) {
+                for (unsigned SrcIdx : RhsTaint) {
+                    for (unsigned DstIdx : DstIt->second) {
+                        if (SrcIdx != DstIdx) {
+                            OutParamSinks.emplace(SrcIdx, DstIdx);
+                        }
+                    }
+                }
+            }
+        } else {
+            VarParamTaint[Sink.BaseVD].insert(RhsTaint.begin(), RhsTaint.end());
+        }
+    };
+
     auto walkHelperStmt = [&](auto &self, const Stmt *S) -> void {
         if (!S) return;
         if (const auto *DS = dyn_cast<DeclStmt>(S)) {
@@ -319,12 +427,49 @@ llvm::SmallVector<unsigned, 4> VeriObjCVisitor::getForwardedParamIndices(
                     evalExprParamTaint(evalExprParamTaint, VD->getInit(), VarParamTaint[VD]);
                 }
             }
-        } else if (const auto *BO = dyn_cast<BinaryOperator>(S); BO && BO->getOpcode() == BO_Assign) {
-            if (const VarDecl *LHS = extractVarDecl(BO->getLHS())) {
-                evalExprParamTaint(evalExprParamTaint, BO->getRHS(), VarParamTaint[LHS]);
+        } else if (const auto *BO = dyn_cast<BinaryOperator>(S); BO && BO->isAssignmentOp()) {
+            std::set<unsigned> RhsTaint;
+            evalExprParamTaint(evalExprParamTaint, BO->getRHS(), RhsTaint);
+            recordSinkFromLHS(BO->getLHS(), RhsTaint);
+        } else if (const auto *CE = dyn_cast<CallExpr>(S)) {
+            if (const FunctionDecl *Callee = CE->getDirectCallee()) {
+                HelperParamSummary Sub = getHelperParamSummary(Callee, Visiting);
+                for (const auto &[SubParam, GlobName] : Sub.GlobalSinks) {
+                    if (SubParam < CE->getNumArgs()) {
+                        std::set<unsigned> ArgTaint;
+                        evalExprParamTaint(evalExprParamTaint, CE->getArg(SubParam), ArgTaint);
+                        for (unsigned Idx : ArgTaint) {
+                            GlobalSinks.emplace(Idx, GlobName);
+                        }
+                    }
+                }
+                for (const auto &[SubSrc, SubDst] : Sub.OutParamSinks) {
+                    if (SubSrc < CE->getNumArgs() && SubDst < CE->getNumArgs()) {
+                        std::set<unsigned> SrcTaint;
+                        evalExprParamTaint(evalExprParamTaint, CE->getArg(SubSrc), SrcTaint);
+                        if (SrcTaint.empty()) continue;
+                        const Expr *DstArg = CE->getArg(SubDst)->IgnoreParenCasts();
+                        if (const auto *AddrUO = dyn_cast<UnaryOperator>(DstArg);
+                            AddrUO && AddrUO->getOpcode() == UO_AddrOf) {
+                            recordSinkFromLHS(AddrUO->getSubExpr(), SrcTaint);
+                        } else {
+                            std::set<unsigned> DstTaint;
+                            evalExprParamTaint(evalExprParamTaint, DstArg, DstTaint);
+                            for (unsigned SIdx : SrcTaint) {
+                                for (unsigned DIdx : DstTaint) {
+                                    if (SIdx != DIdx) {
+                                        OutParamSinks.emplace(SIdx, DIdx);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else if (const auto *RS = dyn_cast<ReturnStmt>(S)) {
-            evalExprParamTaint(evalExprParamTaint, RS->getRetValue(), ReturnedParams);
+            if (canTypeCarryStackReference(DefFD->getReturnType())) {
+                evalExprParamTaint(evalExprParamTaint, RS->getRetValue(), ReturnedParams);
+            }
         }
         for (const Stmt *Child : S->children()) {
             self(self, Child);
@@ -335,10 +480,16 @@ llvm::SmallVector<unsigned, 4> VeriObjCVisitor::getForwardedParamIndices(
     Visiting.erase(CanonFD);
 
     for (unsigned Idx : ReturnedParams) {
-        Result.push_back(Idx);
+        Summary.ReturnedParams.push_back(Idx);
     }
-    ForwardedParamSummaryCache[CanonFD] = Result;
-    return Result;
+    for (const auto &GS : GlobalSinks) {
+        Summary.GlobalSinks.push_back(GS);
+    }
+    for (const auto &OPS : OutParamSinks) {
+        Summary.OutParamSinks.push_back(OPS);
+    }
+    HelperSummaryCache[CanonFD] = Summary;
+    return Summary;
 }
 
 void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
@@ -351,9 +502,11 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
     // 1. Pre-pass: assign lexical scope depths and identify veriobjc_move() internal AST nodes
     llvm::DenseMap<const Stmt *, unsigned> StmtScopeDepth;
     llvm::DenseMap<const VarDecl *, unsigned> VarScopeDepth;
-    llvm::DenseMap<const CallExpr *, const VarDecl *> MoveMarkerCalls;
-    llvm::DenseSet<const DeclRefExpr *> MoveInternalRefs;
+    std::map<const CallExpr *, LinearTarget> MoveMarkerCalls;
+    llvm::DenseSet<const Stmt *> MoveInternalStmts;
     llvm::DenseSet<const DeclRefExpr *> DirectAssignLHSRefs;
+    llvm::DenseSet<const MemberExpr *> DirectAssignLHSMembers;
+    llvm::DenseSet<const DeclRefExpr *> MemberBaseRefs;
 
     if (const auto *FD = dyn_cast<FunctionDecl>(DC)) {
         for (const ParmVarDecl *PVD : FD->parameters()) {
@@ -374,6 +527,12 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         }
         StmtScopeDepth[S] = NextDepth;
 
+        if (const auto *ME = dyn_cast<MemberExpr>(S)) {
+            if (const auto *BaseDRE = dyn_cast<DeclRefExpr>(ME->getBase()->IgnoreParenCasts())) {
+                MemberBaseRefs.insert(BaseDRE);
+            }
+        }
+
         if (const auto *DS = dyn_cast<DeclStmt>(S)) {
             for (const Decl *D : DS->decls()) {
                 if (const auto *VD = dyn_cast<VarDecl>(D)) {
@@ -385,24 +544,20 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                 if (const auto *CE = dyn_cast<CallExpr>(BO->getLHS()->IgnoreParenCasts())) {
                     const FunctionDecl *Callee = CE->getDirectCallee();
                     if (Callee && Callee->getName() == "__veriobjc_mark_moved" && CE->getNumArgs() == 1) {
-                        const Expr *Arg0 = CE->getArg(0)->IgnoreParenCasts();
-                        if (const auto *UO = dyn_cast<UnaryOperator>(Arg0); UO && UO->getOpcode() == UO_AddrOf) {
-                            Arg0 = UO->getSubExpr()->IgnoreParenCasts();
-                        }
-                        if (const auto *ArgDRE = dyn_cast<DeclRefExpr>(Arg0)) {
-                            if (const auto *MovedVD = dyn_cast<VarDecl>(ArgDRE->getDecl())) {
-                                MoveMarkerCalls[CE] = MovedVD;
-                                MoveInternalRefs.insert(ArgDRE);
-                                if (const auto *RhsDRE = dyn_cast<DeclRefExpr>(BO->getRHS()->IgnoreParenCasts())) {
-                                    MoveInternalRefs.insert(RhsDRE);
-                                }
-                            }
+                        LinearTarget MovedTgt = extractLinearTarget(CE->getArg(0));
+                        if (MovedTgt.RootVD) {
+                            MoveMarkerCalls[CE] = MovedTgt;
+                            collectSubtreeStmts(CE->getArg(0), MoveInternalStmts);
+                            collectSubtreeStmts(BO->getRHS(), MoveInternalStmts);
                         }
                     }
                 }
             } else if (BO->getOpcode() == BO_Assign) {
-                if (const auto *LhsDRE = dyn_cast<DeclRefExpr>(BO->getLHS()->IgnoreParenCasts())) {
+                const Expr *LhsStripped = BO->getLHS()->IgnoreParenCasts();
+                if (const auto *LhsDRE = dyn_cast<DeclRefExpr>(LhsStripped)) {
                     DirectAssignLHSRefs.insert(LhsDRE);
+                } else if (const auto *LhsME = dyn_cast<MemberExpr>(LhsStripped)) {
+                    DirectAssignLHSMembers.insert(LhsME);
                 }
             }
         }
@@ -418,13 +573,13 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
     std::unique_ptr<CFG> Cfg = CFG::buildCFG(OwnerDecl, Body, Context, CfgBuildOpts);
     if (!Cfg) return;
 
-    std::set<std::pair<unsigned, const VarDecl *>> EmittedMoveDiags;
+    std::set<std::pair<unsigned, std::string>> EmittedMoveDiags;
     std::set<unsigned> EmittedEscapeDiags;
 
-    auto emitConsumedOnce = [&](SourceLocation Loc, const VarDecl *UsedVD, const VarDecl *RootVD, LinearValState StVal) {
+    auto emitConsumedOnce = [&](SourceLocation Loc, llvm::StringRef UsedName, llvm::StringRef RootName, LinearValState StVal) {
         unsigned RawLoc = Loc.getRawEncoding();
-        if (EmittedMoveDiags.emplace(RawLoc, UsedVD).second) {
-            reportConsumedVar(Loc, UsedVD->getName(), RootVD->getName(), linearStateName(StVal), FnName);
+        if (EmittedMoveDiags.emplace(RawLoc, UsedName.str()).second) {
+            reportConsumedVar(Loc, UsedName, RootName, linearStateName(StVal), FnName);
         }
     };
 
@@ -554,9 +709,9 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         if (const auto *CE = dyn_cast<CallExpr>(Stripped)) {
             if (const FunctionDecl *Callee = CE->getDirectCallee()) {
                 llvm::DenseSet<const FunctionDecl *> Visiting;
-                auto FwdIndices = getForwardedParamIndices(Callee, Visiting);
+                HelperParamSummary Sub = getHelperParamSummary(Callee, Visiting);
                 StackProv Acc;
-                for (unsigned Idx : FwdIndices) {
+                for (unsigned Idx : Sub.ReturnedParams) {
                     if (Idx < CE->getNumArgs()) {
                         Acc = joinStackProv(Acc, self(self, CE->getArg(Idx), HintRoot, CurDepth, St));
                     }
@@ -568,19 +723,37 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         return {};
     };
 
-    auto checkVarNotConsumed = [&](const VarDecl *VD, SourceLocation Loc, bool CheckFreedToo, const CFGDataflowState &St) -> bool {
+    auto checkVarNotConsumed = [&](const VarDecl *VD, SourceLocation Loc, bool CheckFreedToo, bool WholeStructUse, const CFGDataflowState &St) -> bool {
         if (!VD) return true;
+        if (auto TgtsIt = St.AliasTargets.find(VD); TgtsIt != St.AliasTargets.end() && !TgtsIt->second.empty()) {
+            for (const LinearTarget &Tgt : TgtsIt->second) {
+                if (!Tgt.RootVD) continue;
+                LinearValState RSt = St.Linear.lookup(Tgt.RootVD);
+                if (RSt == LinearValState::Moved || RSt == LinearValState::MaybeMoved) {
+                    emitConsumedOnce(Loc, VD->getName(), Tgt.RootVD->getName(), RSt);
+                    return false;
+                }
+                if (Tgt.Field) {
+                    auto FIt = St.FieldLinear.find(Tgt);
+                    LinearValState FSt = (FIt != St.FieldLinear.end()) ? FIt->second : LinearValState::Unreached;
+                    if (FSt == LinearValState::Moved || FSt == LinearValState::MaybeMoved) {
+                        emitConsumedOnce(Loc, VD->getName(), formatLinearTargetName(Tgt), FSt);
+                        return false;
+                    }
+                }
+            }
+        }
         if (auto RootsIt = St.AliasRoots.find(VD); RootsIt != St.AliasRoots.end() && !RootsIt->second.empty()) {
             for (const VarDecl *R : RootsIt->second) {
                 LinearValState RSt = St.Linear.lookup(R);
                 if (RSt == LinearValState::Moved || RSt == LinearValState::MaybeMoved) {
-                    emitConsumedOnce(Loc, VD, R, RSt);
+                    emitConsumedOnce(Loc, VD->getName(), R->getName(), RSt);
                     return false;
                 }
                 if (CheckFreedToo) {
                     LinearValState FSt = St.PoolFreed.lookup(R);
                     if (FSt == LinearValState::Moved || FSt == LinearValState::MaybeMoved) {
-                        emitConsumedOnce(Loc, VD, R, FSt);
+                        emitConsumedOnce(Loc, VD->getName(), R->getName(), FSt);
                         return false;
                     }
                 }
@@ -588,26 +761,70 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         }
         LinearValState SelfSt = St.Linear.lookup(VD);
         if (SelfSt == LinearValState::Moved || SelfSt == LinearValState::MaybeMoved) {
-            emitConsumedOnce(Loc, VD, VD, SelfSt);
+            emitConsumedOnce(Loc, VD->getName(), VD->getName(), SelfSt);
             return false;
+        }
+        if (WholeStructUse) {
+            for (const auto &[Tgt, FSt] : St.FieldLinear) {
+                if (Tgt.RootVD == VD && (FSt == LinearValState::Moved || FSt == LinearValState::MaybeMoved)) {
+                    emitConsumedOnce(Loc, VD->getName(), formatLinearTargetName(Tgt), FSt);
+                    return false;
+                }
+            }
         }
         if (CheckFreedToo) {
             LinearValState SelfFr = St.PoolFreed.lookup(VD);
             if (SelfFr == LinearValState::Moved || SelfFr == LinearValState::MaybeMoved) {
-                emitConsumedOnce(Loc, VD, VD, SelfFr);
+                emitConsumedOnce(Loc, VD->getName(), VD->getName(), SelfFr);
                 return false;
             }
         }
         return true;
     };
 
-    auto consumeVarAndRoots = [&](const VarDecl *VD, CFGDataflowState &St) {
-        if (!VD) return;
-        St.Linear[VD] = LinearValState::Moved;
-        auto It = St.AliasRoots.find(VD);
-        if (It != St.AliasRoots.end()) {
-            for (const VarDecl *R : It->second) {
-                St.Linear[R] = LinearValState::Moved;
+    auto checkTargetNotConsumed = [&](const LinearTarget &Tgt, SourceLocation Loc, const CFGDataflowState &St) -> bool {
+        if (!Tgt.RootVD) return true;
+        if (!Tgt.Field) {
+            return checkVarNotConsumed(Tgt.RootVD, Loc, /*CheckFreedToo=*/true, /*WholeStructUse=*/true, St);
+        }
+        if (!checkVarNotConsumed(Tgt.RootVD, Loc, /*CheckFreedToo=*/false, /*WholeStructUse=*/false, St)) {
+            return false;
+        }
+        auto FIt = St.FieldLinear.find(Tgt);
+        LinearValState FSt = (FIt != St.FieldLinear.end()) ? FIt->second : LinearValState::Unreached;
+        if (FSt == LinearValState::Moved || FSt == LinearValState::MaybeMoved) {
+            std::string TgtStr = formatLinearTargetName(Tgt);
+            emitConsumedOnce(Loc, TgtStr, TgtStr, FSt);
+            return false;
+        }
+        return true;
+    };
+
+    auto consumeTargetAndRoots = [&](const LinearTarget &Tgt, CFGDataflowState &St) {
+        if (!Tgt.RootVD) return;
+        if (!Tgt.Field) {
+            St.Linear[Tgt.RootVD] = LinearValState::Moved;
+            auto It = St.AliasRoots.find(Tgt.RootVD);
+            if (It != St.AliasRoots.end()) {
+                for (const VarDecl *R : It->second) {
+                    St.Linear[R] = LinearValState::Moved;
+                }
+            }
+            if (auto TIt = St.AliasTargets.find(Tgt.RootVD); TIt != St.AliasTargets.end()) {
+                for (const LinearTarget &AT : TIt->second) {
+                    if (AT.Field) {
+                        St.FieldLinear[AT] = LinearValState::Moved;
+                    } else if (AT.RootVD) {
+                        St.Linear[AT.RootVD] = LinearValState::Moved;
+                    }
+                }
+            }
+        } else {
+            St.FieldLinear[Tgt] = LinearValState::Moved;
+            if (auto It = St.AliasRoots.find(Tgt.RootVD); It != St.AliasRoots.end()) {
+                for (const VarDecl *R : It->second) {
+                    St.FieldLinear[{ R, Tgt.Field }] = LinearValState::Moved;
+                }
             }
         }
     };
@@ -625,24 +842,55 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
 
     auto bindVarValue = [&](const VarDecl *DstVD, const Expr *InitExpr, unsigned CurDepth, CFGDataflowState &St) {
         St.Linear[DstVD] = LinearValState::Live;
+        for (auto &[Tgt, FSt] : St.FieldLinear) {
+            if (Tgt.RootVD == DstVD) {
+                FSt = LinearValState::Live;
+            }
+        }
         St.PoolFreed[DstVD] = LinearValState::Live;
         St.AliasRoots[DstVD].clear();
+        St.AliasTargets[DstVD].clear();
+
+        LinearTarget InitTgt = InitExpr ? extractLinearTarget(InitExpr) : LinearTarget{};
         const VarDecl *SrcVD = InitExpr ? extractVarDecl(InitExpr) : nullptr;
-        if (SrcVD && (DstVD->getType()->isPointerType() || DstVD->getType()->isObjCObjectPointerType())) {
-            auto SrcRootsIt = St.AliasRoots.find(SrcVD);
-            if (SrcRootsIt != St.AliasRoots.end() && !SrcRootsIt->second.empty()) {
-                St.AliasRoots[DstVD] = SrcRootsIt->second;
+        if (InitTgt.RootVD && (DstVD->getType()->isPointerType() || DstVD->getType()->isObjCObjectPointerType())) {
+            if (!InitTgt.Field) {
+                auto SrcRootsIt = St.AliasRoots.find(InitTgt.RootVD);
+                if (SrcRootsIt != St.AliasRoots.end() && !SrcRootsIt->second.empty()) {
+                    St.AliasRoots[DstVD] = SrcRootsIt->second;
+                } else {
+                    St.AliasRoots[DstVD].insert(InitTgt.RootVD);
+                }
+                auto SrcTgtsIt = St.AliasTargets.find(InitTgt.RootVD);
+                if (SrcTgtsIt != St.AliasTargets.end() && !SrcTgtsIt->second.empty()) {
+                    St.AliasTargets[DstVD] = SrcTgtsIt->second;
+                } else {
+                    St.AliasTargets[DstVD].insert(InitTgt);
+                }
             } else {
-                St.AliasRoots[DstVD].insert(SrcVD);
+                St.AliasRoots[DstVD].insert(DstVD);
+                auto SrcRootsIt = St.AliasRoots.find(InitTgt.RootVD);
+                if (SrcRootsIt != St.AliasRoots.end() && !SrcRootsIt->second.empty()) {
+                    for (const VarDecl *R : SrcRootsIt->second) {
+                        St.AliasTargets[DstVD].insert({ R, InitTgt.Field });
+                    }
+                } else {
+                    St.AliasTargets[DstVD].insert(InitTgt);
+                }
             }
-            StackProv SrcPP = St.PointeeProv.lookup(SrcVD);
-            if (SrcPP.Depth > 0u) {
-                St.PointeeProv[DstVD] = SrcPP;
+            if (SrcVD) {
+                StackProv SrcPP = St.PointeeProv.lookup(SrcVD);
+                if (SrcPP.Depth > 0u) {
+                    St.PointeeProv[DstVD] = SrcPP;
+                } else {
+                    St.PointeeProv.erase(DstVD);
+                }
             } else {
                 St.PointeeProv.erase(DstVD);
             }
         } else {
             St.AliasRoots[DstVD].insert(DstVD);
+            St.AliasTargets[DstVD].insert({ DstVD, nullptr });
             St.PointeeProv.erase(DstVD);
         }
 
@@ -737,6 +985,12 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                     }
                 }
 
+                if (const auto *LhsME = dyn_cast<MemberExpr>(BO->getLHS()->IgnoreParenCasts())) {
+                    LinearTarget LhsTgt = extractLinearTarget(LhsME);
+                    if (LhsTgt.RootVD && LhsTgt.Field) {
+                        St.FieldLinear[LhsTgt] = LinearValState::Live;
+                    }
+                }
                 self(self, BO->getLHS(), CurDepth, St, Evaluated);
                 checkAndRecordLhsSink(BO->getLHS(), SrcP, BO->getExprLoc(), St);
                 return;
@@ -745,9 +999,9 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
 
         if (const auto *CE = dyn_cast<CallExpr>(S)) {
             if (auto MoveIt = MoveMarkerCalls.find(CE); MoveIt != MoveMarkerCalls.end()) {
-                const VarDecl *MovedVD = MoveIt->second;
-                if (checkVarNotConsumed(MovedVD, CE->getExprLoc(), /*CheckFreedToo=*/true, St)) {
-                    consumeVarAndRoots(MovedVD, St);
+                const LinearTarget &MovedTgt = MoveIt->second;
+                if (checkTargetNotConsumed(MovedTgt, CE->getExprLoc(), St)) {
+                    consumeTargetAndRoots(MovedTgt, St);
                 }
                 return;
             }
@@ -759,7 +1013,7 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                     self(self, CE->getArg(0), CurDepth, St, Evaluated);
                     self(self, CE->getArg(1), CurDepth, St, Evaluated);
                     if (const VarDecl *FreedVD = extractVarDecl(CE->getArg(1))) {
-                        if (checkVarNotConsumed(FreedVD, CE->getArg(1)->getExprLoc(), /*CheckFreedToo=*/true, St)) {
+                        if (checkVarNotConsumed(FreedVD, CE->getArg(1)->getExprLoc(), /*CheckFreedToo=*/true, /*WholeStructUse=*/true, St)) {
                             markFreedVarAndRoots(FreedVD, St);
                         }
                     }
@@ -801,23 +1055,63 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                         }
                     }
                     if (i < CalleeFD->getNumParams() && hasVeriObjCAnnotation(CalleeFD->getParamDecl(i), "objc_consumed")) {
-                        if (const VarDecl *ConsumedVD = extractVarDecl(Arg)) {
-                            consumeVarAndRoots(ConsumedVD, St);
+                        LinearTarget ConsumedTgt = extractLinearTarget(Arg);
+                        if (ConsumedTgt.RootVD) {
+                            consumeTargetAndRoots(ConsumedTgt, St);
                         }
                     }
                 }
-                if (CalleeFD->hasBody()) {
-                    for (unsigned i = 0; i < CE->getNumArgs() && i < CalleeFD->getNumParams(); ++i) {
-                        QualType PT = CalleeFD->getParamDecl(i)->getType();
-                        if (!PT->isPointerType() || PT->getPointeeType().isConstQualified() ||
-                            !canTypeCarryStackReference(PT->getPointeeType())) {
+                if (CalleeFD->hasBody() || isInRuntimeHeader(CalleeFD->getLocation())) {
+                    llvm::DenseSet<const FunctionDecl *> Visiting;
+                    HelperParamSummary HelperSum = getHelperParamSummary(CalleeFD, Visiting);
+
+                    for (const auto &[ParamIdx, GlobName] : HelperSum.GlobalSinks) {
+                        if (ParamIdx < CE->getNumArgs() && ArgProvs[ParamIdx].Depth > 0u) {
+                            std::string SinkDesc = "global '" + GlobName + "' via helper '" + CalleeFD->getNameAsString() + "'";
+                            emitEscapeOnce(CE->getArg(ParamIdx)->getExprLoc(), ArgProvs[ParamIdx], SinkDesc);
+                        }
+                    }
+                    for (const auto &[SrcIdx, DstIdx] : HelperSum.OutParamSinks) {
+                        if (SrcIdx >= CE->getNumArgs() || DstIdx >= CE->getNumArgs() || ArgProvs[SrcIdx].Depth == 0u) {
                             continue;
                         }
-                        const VarDecl *OutPtrVD = extractVarDecl(CE->getArg(i));
-                        if (!OutPtrVD) continue;
-                        for (unsigned j = 0; j < CE->getNumArgs(); ++j) {
-                            if (j == i || ArgProvs[j].Depth == 0u) continue;
-                            St.PointeeProv[OutPtrVD] = joinStackProv(St.PointeeProv.lookup(OutPtrVD), ArgProvs[j]);
+                        const StackProv &SrcP = ArgProvs[SrcIdx];
+                        const Expr *DstArg = CE->getArg(DstIdx)->IgnoreParenCasts();
+                        if (const auto *AddrUO = dyn_cast<UnaryOperator>(DstArg);
+                            AddrUO && AddrUO->getOpcode() == UO_AddrOf) {
+                            checkAndRecordLhsSink(AddrUO->getSubExpr(), SrcP, CE->getExprLoc(), St);
+                        } else if (const VarDecl *DstPtrVD = extractVarDecl(DstArg)) {
+                            if (DstPtrVD->hasGlobalStorage()) {
+                                std::string SinkDesc = "global pointer '*" + DstPtrVD->getNameAsString() + "' via helper '" + CalleeFD->getNameAsString() + "'";
+                                emitEscapeOnce(CE->getExprLoc(), SrcP, SinkDesc);
+                            } else if (isa<ParmVarDecl>(DstPtrVD)) {
+                                std::string SinkDesc = "out-parameter '*" + DstPtrVD->getNameAsString() + "' via helper '" + CalleeFD->getNameAsString() + "'";
+                                emitEscapeOnce(CE->getExprLoc(), SrcP, SinkDesc);
+                            } else {
+                                unsigned TargetDepth = St.Prov.lookup(DstPtrVD).Depth;
+                                if (TargetDepth < SrcP.Depth) {
+                                    std::string SinkDesc = "outer pointer '*" + DstPtrVD->getNameAsString() + "' via helper '" + CalleeFD->getNameAsString() + "'";
+                                    emitEscapeOnce(CE->getExprLoc(), SrcP, SinkDesc);
+                                } else {
+                                    St.PointeeProv[DstPtrVD] = joinStackProv(St.PointeeProv.lookup(DstPtrVD), SrcP);
+                                }
+                            }
+                        }
+                    }
+
+                    if (CalleeFD->hasBody()) {
+                        for (unsigned i = 0; i < CE->getNumArgs() && i < CalleeFD->getNumParams(); ++i) {
+                            QualType PT = CalleeFD->getParamDecl(i)->getType();
+                            if (!PT->isPointerType() || PT->getPointeeType().isConstQualified() ||
+                                !canTypeCarryStackReference(PT->getPointeeType())) {
+                                continue;
+                            }
+                            const VarDecl *OutPtrVD = extractVarDecl(CE->getArg(i));
+                            if (!OutPtrVD) continue;
+                            for (unsigned j = 0; j < CE->getNumArgs(); ++j) {
+                                if (j == i || ArgProvs[j].Depth == 0u) continue;
+                                St.PointeeProv[OutPtrVD] = joinStackProv(St.PointeeProv.lookup(OutPtrVD), ArgProvs[j]);
+                            }
                         }
                     }
                 }
@@ -836,10 +1130,24 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
             return;
         }
 
+        if (const auto *ME = dyn_cast<MemberExpr>(S)) {
+            if (!MoveInternalStmts.contains(ME) && !DirectAssignLHSMembers.contains(ME)) {
+                LinearTarget Tgt = extractLinearTarget(ME);
+                if (Tgt.RootVD && Tgt.Field) {
+                    checkTargetNotConsumed(Tgt, ME->getMemberLoc(), St);
+                }
+            }
+            for (const Stmt *Child : S->children()) {
+                self(self, Child, CurDepth, St, Evaluated);
+            }
+            return;
+        }
+
         if (const auto *DRE = dyn_cast<DeclRefExpr>(S)) {
-            if (!MoveInternalRefs.contains(DRE) && !DirectAssignLHSRefs.contains(DRE)) {
+            if (!MoveInternalStmts.contains(DRE) && !DirectAssignLHSRefs.contains(DRE)) {
                 if (const auto *VD = dyn_cast<VarDecl>(DRE->getDecl())) {
-                    checkVarNotConsumed(VD, DRE->getLocation(), /*CheckFreedToo=*/false, St);
+                    bool WholeStruct = !MemberBaseRefs.contains(DRE);
+                    checkVarNotConsumed(VD, DRE->getLocation(), /*CheckFreedToo=*/false, WholeStruct, St);
                 }
             }
             return;
@@ -861,6 +1169,7 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
         if (Depth == 0u) {
             InStates[EntryID].Linear[VD] = LinearValState::Live;
             InStates[EntryID].AliasRoots[VD].insert(VD);
+            InStates[EntryID].AliasTargets[VD].insert({ VD, nullptr });
         }
     }
 
