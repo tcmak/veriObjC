@@ -82,6 +82,7 @@ Two artifacts, both CI gates:
 | Width-mismatched `zip` | "Stream width mismatch" | Compile-time equal-N check | `test_banned_stream_width_mismatch.m` ✓ |
 | Context exceeding `ContextCap` | "Context cap exceeded — compile error" | Pre-banked BRAM arenas (`vstream_kv_arena_def`) | `test_banned_context_overflow.m` / `test_banned_kv_arena_overflow.m` ✓ |
 | Direct or transitive runtime multiplication/division in `objc_hw_kernel` | "ternary datapaths must use 0 DSPs" | Shift/CMUX/popcount arithmetic (`<vstd/ternary.h>`) | `test_banned_zero_dsp_helper_mul.m` ✓ |
+| Indirect (fn-ptr/block) or bodyless `extern` call reachable from `objc_hw_kernel` | "closed-world 0-DSP verification requires statically visible callee bodies" | Direct statically defined helpers or `vconstexpr` | `test_banned_hw_kernel_fnptr_call.m`, `test_banned_hw_kernel_extern_call.m`, `valid_objc_hw_kernel_fnptr_call.m`, `valid_objc_hw_kernel_extern_call.m` ✓ |
 
 ---
 

@@ -1232,14 +1232,32 @@ void VeriObjCVisitor::recordDspGraphForBody(const Decl *OwnerDecl, const Stmt *B
             }
         } else if (const auto *CE = dyn_cast<CallExpr>(S)) {
             if (const FunctionDecl *CalleeFD = CE->getDirectCallee()) {
-                if (!isInRuntimeHeader(CalleeFD->getLocation()) &&
-                    !Context->getSourceManager().isInSystemHeader(CalleeFD->getLocation()) &&
+                bool IsAllowedHeaderInline =
+                    (isInRuntimeHeader(CalleeFD->getLocation()) ||
+                     Context->getSourceManager().isInSystemHeader(CalleeFD->getLocation())) &&
+                    CalleeFD->hasBody();
+                if (CalleeFD->getBuiltinID() == 0 &&
+                    !IsAllowedHeaderInline &&
                     !hasVeriObjCAnnotation(CalleeFD, "objc_vconstexpr")) {
                     DspCallEdges[CanonOwner].push_back({
                         CalleeFD->getCanonicalDecl(),
                         CE->getExprLoc()
                     });
                 }
+            } else {
+                unsigned Line = Context->getSourceManager().getSpellingLineNumber(CE->getExprLoc());
+                std::string IndirectDesc = "indirect function/block call";
+                if (const Expr *CalleeE = CE->getCallee()) {
+                    if (const VarDecl *CalleeVD = extractVarDecl(CalleeE)) {
+                        IndirectDesc = "indirect call via '" + CalleeVD->getNameAsString() + "'";
+                    }
+                }
+                DirectDspOps[CanonOwner].push_back({
+                    IndirectDesc,
+                    Line,
+                    CE->getExprLoc(),
+                    /*IsOpaqueCall=*/true
+                });
             }
         } else if (const auto *OME = dyn_cast<ObjCMessageExpr>(S)) {
             if (const ObjCMethodDecl *CalleeMD = OME->getMethodDecl()) {
@@ -1265,24 +1283,51 @@ void VeriObjCVisitor::registerHwKernelRoot(const Decl *KernelDecl, llvm::StringR
 }
 
 void VeriObjCVisitor::verifyAllHwKernelsZeroDsp() {
+    auto isCalleeBodyMissing = [](const Decl *D) -> bool {
+        if (const auto *FD = dyn_cast_or_null<FunctionDecl>(D)) {
+            return FD->getDefinition() == nullptr;
+        }
+        if (const auto *MD = dyn_cast_or_null<ObjCMethodDecl>(D)) {
+            if (MD->hasBody()) return false;
+            if (const ObjCInterfaceDecl *ID = MD->getClassInterface()) {
+                if (const ObjCImplementationDecl *Impl = ID->getImplementation()) {
+                    if (const ObjCMethodDecl *ImplMD = Impl->getMethod(MD->getSelector(), MD->isInstanceMethod())) {
+                        return !ImplMD->hasBody();
+                    }
+                }
+            }
+            return true;
+        }
+        return false;
+    };
+
     for (const HwKernelRecord &Kernel : HwKernels) {
-        // 1. Direct DSP arithmetic in the kernel itself
+        // 1. Direct DSP arithmetic or direct indirect calls in the kernel itself
         if (auto DirectIt = DirectDspOps.find(Kernel.KernelDecl);
             DirectIt != DirectDspOps.end() && !DirectIt->second.empty()) {
             for (const DspOpSite &Site : DirectIt->second) {
-                reportError(
-                    Site.Loc,
-                    "VeriObjC Violation: Hardware kernel '%0' contains runtime multiplication or division ('%1' at line %2); ternary datapaths must use 0 DSPs."
-                ) << Kernel.KernelName << Site.OpStr << Site.Line;
+                if (Site.IsOpaqueCall) {
+                    reportError(
+                        Site.Loc,
+                        "VeriObjC Violation: Hardware kernel '%0' contains %1 at line %2; closed-world 0-DSP verification requires statically visible callee bodies."
+                    ) << Kernel.KernelName << Site.OpStr << Site.Line;
+                } else {
+                    reportError(
+                        Site.Loc,
+                        "VeriObjC Violation: Hardware kernel '%0' contains runtime multiplication or division ('%1' at line %2); ternary datapaths must use 0 DSPs."
+                    ) << Kernel.KernelName << Site.OpStr << Site.Line;
+                }
             }
             continue;
         }
 
-        // 2. Transitive call-graph BFS for DSP arithmetic in helper functions/methods
+        // 2. Transitive call-graph BFS for DSP arithmetic, indirect calls, or bodyless callees
         struct QueueEntry {
             const Decl *Callee = nullptr;
+            SourceLocation CallSiteLoc;
             SourceLocation RootCallLoc;
             std::string Chain;
+            bool IsDirectEdge = false;
         };
 
         std::deque<QueueEntry> Queue;
@@ -1292,7 +1337,7 @@ void VeriObjCVisitor::verifyAllHwKernelsZeroDsp() {
         if (auto EdgeIt = DspCallEdges.find(Kernel.KernelDecl); EdgeIt != DspCallEdges.end()) {
             for (const auto &[Callee, CallLoc] : EdgeIt->second) {
                 if (Visited.insert(Callee).second) {
-                    Queue.push_back({ Callee, CallLoc, getDeclDisplayName(Callee) });
+                    Queue.push_back({ Callee, CallLoc, CallLoc, getDeclDisplayName(Callee), /*IsDirectEdge=*/true });
                 }
             }
         }
@@ -1301,22 +1346,47 @@ void VeriObjCVisitor::verifyAllHwKernelsZeroDsp() {
             QueueEntry Cur = std::move(Queue.front());
             Queue.pop_front();
 
+            if (isCalleeBodyMissing(Cur.Callee)) {
+                unsigned Line = Context->getSourceManager().getSpellingLineNumber(Cur.CallSiteLoc);
+                if (Cur.IsDirectEdge) {
+                    reportError(
+                        Cur.RootCallLoc,
+                        "VeriObjC Violation: Hardware kernel '%0' calls bodyless external function '%1' at line %2; closed-world 0-DSP verification requires statically visible callee bodies."
+                    ) << Kernel.KernelName << getDeclDisplayName(Cur.Callee) << Line;
+                } else {
+                    reportError(
+                        Cur.RootCallLoc,
+                        "VeriObjC Violation: Hardware kernel '%0' transitively invokes bodyless external function '%1' at line %2 via '%3'; closed-world 0-DSP verification requires statically visible callee bodies."
+                    ) << Kernel.KernelName << getDeclDisplayName(Cur.Callee) << Line << Cur.Chain;
+                }
+                break;
+            }
+
             if (auto OpIt = DirectDspOps.find(Cur.Callee); OpIt != DirectDspOps.end() && !OpIt->second.empty()) {
                 const DspOpSite &Site = OpIt->second.front();
-                reportError(
-                    Cur.RootCallLoc,
-                    "VeriObjC Violation: Hardware kernel '%0' transitively invokes DSP arithmetic ('%1' in '%2' at line %3 via '%4'); ternary datapaths must use 0 DSPs."
-                ) << Kernel.KernelName << Site.OpStr << getDeclDisplayName(Cur.Callee) << Site.Line << Cur.Chain;
+                if (Site.IsOpaqueCall) {
+                    reportError(
+                        Cur.RootCallLoc,
+                        "VeriObjC Violation: Hardware kernel '%0' transitively invokes %1 in '%2' at line %3 via '%4'; closed-world 0-DSP verification requires statically visible callee bodies."
+                    ) << Kernel.KernelName << Site.OpStr << getDeclDisplayName(Cur.Callee) << Site.Line << Cur.Chain;
+                } else {
+                    reportError(
+                        Cur.RootCallLoc,
+                        "VeriObjC Violation: Hardware kernel '%0' transitively invokes DSP arithmetic ('%1' in '%2' at line %3 via '%4'); ternary datapaths must use 0 DSPs."
+                    ) << Kernel.KernelName << Site.OpStr << getDeclDisplayName(Cur.Callee) << Site.Line << Cur.Chain;
+                }
                 break;
             }
 
             if (auto NextIt = DspCallEdges.find(Cur.Callee); NextIt != DspCallEdges.end()) {
-                for (const auto &[NextCallee, _] : NextIt->second) {
+                for (const auto &[NextCallee, NextCallLoc] : NextIt->second) {
                     if (Visited.insert(NextCallee).second) {
                         Queue.push_back({
                             NextCallee,
+                            NextCallLoc,
                             Cur.RootCallLoc,
-                            Cur.Chain + " -> " + getDeclDisplayName(NextCallee)
+                            Cur.Chain + " -> " + getDeclDisplayName(NextCallee),
+                            /*IsDirectEdge=*/false
                         });
                     }
                 }

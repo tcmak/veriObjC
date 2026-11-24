@@ -85,6 +85,7 @@ private:
         std::string OpStr;
         unsigned Line = 0;
         clang::SourceLocation Loc;
+        bool IsOpaqueCall = false;
     };
 
     struct HwKernelRecord {
