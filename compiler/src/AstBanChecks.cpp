@@ -1135,9 +1135,13 @@ bool VeriObjCVisitor::VisitObjCAtTryStmt(ObjCAtTryStmt *S) {
 }
 
 bool VeriObjCVisitor::VisitStmtExpr(StmtExpr *E) {
-    if (!Context->getSourceManager().isInSystemHeader(E->getBeginLoc()) &&
-        !isInRuntimeHeader(E->getBeginLoc())) {
-        reportError(E->getBeginLoc(), "VeriObjC Violation: Banned computation macro: preprocessor statement-expression codegen is forbidden; use vconstexpr.");
+    const SourceManager &SM = Context->getSourceManager();
+    SourceLocation Loc = E->getBeginLoc();
+    if (!SM.isInSystemHeader(Loc) &&
+        !SM.isInSystemMacro(Loc) &&
+        !SM.isInSystemHeader(SM.getSpellingLoc(Loc)) &&
+        !isInRuntimeHeader(Loc)) {
+        reportError(Loc, "VeriObjC Violation: Banned computation macro: preprocessor statement-expression codegen is forbidden; use vconstexpr.");
     }
     return true;
 }

@@ -1040,7 +1040,8 @@ bool VeriObjCVisitor::analyzeAndRewriteBody(Stmt *Body, DeclContext *DC) {
 }
 
 void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
-    if (!D || D->isInvalidDecl() || isInRuntimeHeader(D->getLocation())) {
+    if (!D || D->isInvalidDecl() || isInRuntimeHeader(D->getLocation()) ||
+        Context->getSourceManager().isInSystemHeader(D->getLocation())) {
         return;
     }
 

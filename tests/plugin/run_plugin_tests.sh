@@ -327,6 +327,8 @@ for test_file in "$REPO_ROOT"/tests/plugin/negative/*.m; do
         EXPECTED_MSG="VeriObjC Violation: Unknown VeriObjC annotation"
     elif [[ "$base_name" == test_banned_host_io_in_default_fn* ]]; then
         EXPECTED_MSG="@cold function 'veriobjc_host_load_file_staged' cannot be called from non-@cold function"
+    elif [[ "$base_name" == test_banned_escape_via_pointee_field* ]]; then
+        EXPECTED_MSG="Escaping data-stack reference 'stack_wire_bytes'"
     elif [[ "$base_name" == test_banned_isystem_c99_in_nolatency* ]]; then
         EXPECTED_MSG="defaults to @cold and cannot be called from a @nolatency context"
     fi

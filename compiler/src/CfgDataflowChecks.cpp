@@ -50,6 +50,7 @@ struct CFGDataflowState {
     llvm::DenseMap<const VarDecl *, LinearValState> PoolFreed;
     std::map<const VarDecl *, std::set<const VarDecl *>> AliasRoots;
     llvm::DenseMap<const VarDecl *, StackProv> Prov;
+    llvm::DenseMap<const VarDecl *, StackProv> PointeeProv;
 };
 
 bool joinCFGState(CFGDataflowState &Dst, const CFGDataflowState &Src) {
@@ -88,6 +89,13 @@ bool joinCFGState(CFGDataflowState &Dst, const CFGDataflowState &Src) {
         auto It = Dst.Prov.find(VD);
         if (It == Dst.Prov.end() || SrcP.Depth > It->second.Depth) {
             Dst.Prov[VD] = SrcP;
+            Changed = true;
+        }
+    }
+    for (const auto &[VD, SrcPP] : Src.PointeeProv) {
+        auto It = Dst.PointeeProv.find(VD);
+        if (It == Dst.PointeeProv.end() || SrcPP.Depth > It->second.Depth) {
+            Dst.PointeeProv[VD] = SrcPP;
             Changed = true;
         }
     }
@@ -501,6 +509,13 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                     AddrUO && AddrUO->getOpcode() == UO_AddrOf) {
                     return self(self, AddrUO->getSubExpr(), HintRoot, CurDepth, St);
                 }
+                if (ME->getMemberDecl()->getType()->isArrayType()) {
+                    return self(self, ME->getBase(), HintRoot, CurDepth, St);
+                }
+                if (const VarDecl *ArrowVD = extractVarDecl(ArrowBase)) {
+                    return St.PointeeProv.lookup(ArrowVD);
+                }
+                return {};
             }
             return self(self, ME->getBase(), HintRoot, CurDepth, St);
         }
@@ -620,8 +635,15 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
             } else {
                 St.AliasRoots[DstVD].insert(SrcVD);
             }
+            StackProv SrcPP = St.PointeeProv.lookup(SrcVD);
+            if (SrcPP.Depth > 0u) {
+                St.PointeeProv[DstVD] = SrcPP;
+            } else {
+                St.PointeeProv.erase(DstVD);
+            }
         } else {
             St.AliasRoots[DstVD].insert(DstVD);
+            St.PointeeProv.erase(DstVD);
         }
 
         if (InitExpr) {
@@ -657,6 +679,8 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                     ? ("outer pointer '*" + BaseVD->getNameAsString() + "'")
                     : ("outer field '" + BaseVD->getNameAsString() + "->" + SinkInfo.FieldName + "'");
                 emitEscapeOnce(DiagLoc, SrcP, Sink);
+            } else {
+                St.PointeeProv[BaseVD] = joinStackProv(St.PointeeProv.lookup(BaseVD), SrcP);
             }
         } else {
             unsigned HolderDepth = VarScopeDepth.lookup(BaseVD);
@@ -757,11 +781,13 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
 
                 // FFI cross-boundary check on bodyless external functions
                 bool IsExternalFFI = !CalleeFD->hasBody() && !isInRuntimeHeader(CalleeFD->getLocation());
+                llvm::SmallVector<StackProv, 4> ArgProvs(CE->getNumArgs());
                 for (unsigned i = 0; i < CE->getNumArgs(); ++i) {
                     const Expr *Arg = CE->getArg(i);
                     self(self, Arg, CurDepth, St, Evaluated);
+                    ArgProvs[i] = evalProvenance(evalProvenance, Arg, "", CurDepth, St);
                     if (IsExternalFFI) {
-                        StackProv ArgP = evalProvenance(evalProvenance, Arg, "", CurDepth, St);
+                        const StackProv &ArgP = ArgProvs[i];
                         if (ArgP.Depth > 0u) {
                             unsigned RawLoc = Arg->getExprLoc().getRawEncoding();
                             if (EmittedEscapeDiags.insert(RawLoc).second) {
@@ -777,6 +803,21 @@ void VeriObjCVisitor::analyzeFunctionCFGDataflow(Stmt *Body, DeclContext *DC) {
                     if (i < CalleeFD->getNumParams() && hasVeriObjCAnnotation(CalleeFD->getParamDecl(i), "objc_consumed")) {
                         if (const VarDecl *ConsumedVD = extractVarDecl(Arg)) {
                             consumeVarAndRoots(ConsumedVD, St);
+                        }
+                    }
+                }
+                if (CalleeFD->hasBody()) {
+                    for (unsigned i = 0; i < CE->getNumArgs() && i < CalleeFD->getNumParams(); ++i) {
+                        QualType PT = CalleeFD->getParamDecl(i)->getType();
+                        if (!PT->isPointerType() || PT->getPointeeType().isConstQualified() ||
+                            !canTypeCarryStackReference(PT->getPointeeType())) {
+                            continue;
+                        }
+                        const VarDecl *OutPtrVD = extractVarDecl(CE->getArg(i));
+                        if (!OutPtrVD) continue;
+                        for (unsigned j = 0; j < CE->getNumArgs(); ++j) {
+                            if (j == i || ArgProvs[j].Depth == 0u) continue;
+                            St.PointeeProv[OutPtrVD] = joinStackProv(St.PointeeProv.lookup(OutPtrVD), ArgProvs[j]);
                         }
                     }
                 }
