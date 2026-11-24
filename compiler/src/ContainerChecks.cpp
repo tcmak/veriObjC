@@ -54,6 +54,12 @@ void VeriObjCVisitor::checkFlatPayloadType(QualType T, llvm::StringRef TypeName,
 const VarDecl *VeriObjCVisitor::extractVResultIsOkVar(const Expr *Cond) {
     if (!Cond) return nullptr;
     Cond = Cond->IgnoreParenImpCasts();
+    if (const auto *CE = dyn_cast<CallExpr>(Cond)) {
+        if (const FunctionDecl *Callee = CE->getDirectCallee();
+            Callee && Callee->getName() == "__vresult_check_ok" && CE->getNumArgs() == 1) {
+            Cond = CE->getArg(0)->IgnoreParenImpCasts();
+        }
+    }
     if (const auto *ME = dyn_cast<MemberExpr>(Cond)) {
         if (ME->getMemberDecl()->getName() == "is_ok") {
             return extractVarDecl(ME->getBase());
@@ -61,6 +67,24 @@ const VarDecl *VeriObjCVisitor::extractVResultIsOkVar(const Expr *Cond) {
     }
     return nullptr;
 }
+
+namespace {
+bool stmtAlwaysReturns(const Stmt *S) {
+    if (!S) return false;
+    if (isa<ReturnStmt>(S)) return true;
+    if (const auto *CS = dyn_cast<CompoundStmt>(S)) {
+        for (const Stmt *Child : CS->body()) {
+            if (stmtAlwaysReturns(Child)) return true;
+        }
+        return false;
+    }
+    if (const auto *IS = dyn_cast<IfStmt>(S)) {
+        return IS->getThen() && IS->getElse() &&
+               stmtAlwaysReturns(IS->getThen()) && stmtAlwaysReturns(IS->getElse());
+    }
+    return false;
+}
+} // namespace
 
 bool VeriObjCVisitor::containsVAsyncReadyCall(const Stmt *S) {
     if (!S) return false;
@@ -96,10 +120,69 @@ void VeriObjCVisitor::analyzeVResultAndStackArrays(
 ) {
     if (!S) return;
 
+    auto extractNegatedIsOkVar = [](const Expr *Cond) -> const VarDecl * {
+        if (!Cond) return nullptr;
+        Cond = Cond->IgnoreParenImpCasts();
+        if (const auto *UO = dyn_cast<UnaryOperator>(Cond); UO && UO->getOpcode() == UO_LNot) {
+            return extractVResultIsOkVar(UO->getSubExpr());
+        }
+        return nullptr;
+    };
+
     if (const auto *WS = dyn_cast<WhileStmt>(S)) {
         if (containsVAsyncReadyCall(WS->getCond())) {
             reportError(WS->getWhileLoc(), "VeriObjC Violation: Banned polling ring in vasync pipeline: wake-up must be interrupt-driven without busy-wait loops.");
         }
+    }
+
+    if (const auto *CS = dyn_cast<CompoundStmt>(S)) {
+        llvm::SmallVector<const VarDecl *, 4> BlockProvenAdded;
+        for (const Stmt *Child : CS->body()) {
+            analyzeVResultAndStackArrays(
+                Child, EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+                VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
+            if (const auto *IS = dyn_cast<IfStmt>(Child); IS && !IS->getElse() && stmtAlwaysReturns(IS->getThen())) {
+                if (const VarDecl *NegVD = extractNegatedIsOkVar(IS->getCond())) {
+                    if (ProvenOkVars.insert(NegVD).second) {
+                        BlockProvenAdded.push_back(NegVD);
+                    }
+                }
+            }
+        }
+        for (const VarDecl *VD : BlockProvenAdded) {
+            ProvenOkVars.erase(VD);
+        }
+        return;
+    }
+
+    if (const auto *BO = dyn_cast<BinaryOperator>(S); BO && BO->isAssignmentOp()) {
+        if (const VarDecl *LHS = extractVarDecl(BO->getLHS())) {
+            ProvenOkVars.erase(LHS);
+        }
+    }
+    if (const auto *UO = dyn_cast<UnaryOperator>(S); UO && UO->getOpcode() == UO_AddrOf) {
+        if (const VarDecl *SubVD = extractVarDecl(UO->getSubExpr())) {
+            ProvenOkVars.erase(SubVD);
+        }
+    }
+
+    if (const auto *CO = dyn_cast<ConditionalOperator>(S)) {
+        analyzeVResultAndStackArrays(
+            CO->getCond(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+            VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
+        const VarDecl *ProvenVD = extractVResultIsOkVar(CO->getCond());
+        const VarDecl *NegVD = extractNegatedIsOkVar(CO->getCond());
+        bool InsertedThen = ProvenVD && ProvenOkVars.insert(ProvenVD).second;
+        analyzeVResultAndStackArrays(
+            CO->getTrueExpr(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+            VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
+        if (InsertedThen) ProvenOkVars.erase(ProvenVD);
+        bool InsertedElse = NegVD && ProvenOkVars.insert(NegVD).second;
+        analyzeVResultAndStackArrays(
+            CO->getFalseExpr(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
+            VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
+        if (InsertedElse) ProvenOkVars.erase(NegVD);
+        return;
     }
 
     if (const auto *IS = dyn_cast<IfStmt>(S)) {
@@ -107,15 +190,18 @@ void VeriObjCVisitor::analyzeVResultAndStackArrays(
             IS->getCond(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
             VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
         const VarDecl *ProvenVD = extractVResultIsOkVar(IS->getCond());
-        if (ProvenVD) ProvenOkVars.insert(ProvenVD);
+        const VarDecl *NegVD = extractNegatedIsOkVar(IS->getCond());
+        bool InsertedThen = ProvenVD && ProvenOkVars.insert(ProvenVD).second;
         analyzeVResultAndStackArrays(
             IS->getThen(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
             VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
-        if (ProvenVD) ProvenOkVars.erase(ProvenVD);
+        if (InsertedThen) ProvenOkVars.erase(ProvenVD);
         if (IS->getElse()) {
+            bool InsertedElse = NegVD && ProvenOkVars.insert(NegVD).second;
             analyzeVResultAndStackArrays(
                 IS->getElse(), EnclosingFnName, IsNoLatencyFn, ProvenOkVars, ActiveStackArray,
                 VVectorPushCounts, VHashInsertCounts, VDmaRingCounts);
+            if (InsertedElse) ProvenOkVars.erase(NegVD);
         }
         return;
     }

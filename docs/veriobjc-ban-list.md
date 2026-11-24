@@ -39,7 +39,7 @@ Two artifacts, both CI gates:
 | Non-flat channel payload | Yes | "Banned non-flat channel payload" | Flat values; crossing = `memcpy` | `test_banned_nonflat_channel.m` ✓ |
 | General heap on constrained paths | Yes (`malloc`) | "`@alloc` not permitted in `@nolatency` context" | Data stacks / `vpool` | `test_banned_heap_nolatency.m` ✓ |
 | Double free / use-after-move (including aliases & loop back-edges) | — | "Use of consumed linear variable" | `move`/`consumed` CFG lattice tracking | `test_banned_double_free.m`, `test_banned_use_after_move*.m` ✓ |
-| Unannotated `extern fn` called from `@nolatency` | Yes | "defaults to `@cold`" | Declared effects on `extern fn` | `test_cold_ffi_call.m` ✓ |
+| Unannotated `extern fn` / `@cold` helper called outside `@cold` | Yes | "defaults to `@cold`" / "`@cold` function ... cannot be called from non-`@cold`" | Declared effects on `extern fn`; mark callers `veriobjc_cold` | `test_cold_ffi_call.m`, `test_banned_host_io_in_default_fn.m`, `valid_objc_host_io_outside_cold.m` ✓ |
 | Data-stack reference / pool slot across FFI | Yes | "Banned cross-boundary ownership" | Opaque `vpool` handles | `test_ffi_stack_ref_export.m` / `test_banned_ffi_nonflat_export.m` ✓ |
 | Allocator mixing (foreign `free`, VeriObjC recycling of foreign memory) | Yes | "Banned allocator mixing" | Each allocator's products stay on its side | `test_banned_alloc_mixing.m` ✓ |
 | Blocking POSIX I/O (`read`/`write`) on constrained paths | Yes | "Banned blocking I/O in `@nolatency` context" | Non-blocking DMA lines; ring buffers | `test_banned_blocking_io.m` ✓ |

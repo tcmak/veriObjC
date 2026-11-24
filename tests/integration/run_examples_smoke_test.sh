@@ -38,6 +38,7 @@ for m_file in "$REPO_ROOT"/examples/*.m; do
              -I"$REPO_ROOT/vstd/include" \
              -I"$REPO_ROOT/sys0/include" \
              -I"$REPO_ROOT/hw/include" \
+             -I"$REPO_ROOT/host/include" \
              -c "$m_file" \
              -o "$TMP_OBJ"
 

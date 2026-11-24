@@ -1040,7 +1040,7 @@ bool VeriObjCVisitor::analyzeAndRewriteBody(Stmt *Body, DeclContext *DC) {
 }
 
 void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
-    if (!D || Context->getDiagnostics().hasErrorOccurred() || isInRuntimeHeader(D->getLocation())) {
+    if (!D || D->isInvalidDecl() || isInRuntimeHeader(D->getLocation())) {
         return;
     }
 
@@ -1057,6 +1057,10 @@ void VeriObjCVisitor::lowerTopLevelDecl(Decl *D) {
         }
         if (!analyzeAndRewriteBody(FD->getBody(), FD)) return;
         collectBodyMessageSendsPostOrder(FD->getBody(), FD->getName());
+        return;
+    }
+
+    if (Context->getDiagnostics().hasErrorOccurred()) {
         return;
     }
 

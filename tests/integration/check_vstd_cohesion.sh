@@ -99,7 +99,7 @@ for hdr in "$REPO_ROOT"/hw/include/hw/*.h; do
 done
 
 # 5. Layer 'host': host benchmarking, latency gate & report tooling; may import rt and host ONLY (never vstd, sys0, or hw)
-for hdr in "$REPO_ROOT"/host/include/host/*.h; do
+for hdr in "$REPO_ROOT"/host/include/*.h "$REPO_ROOT"/host/include/host/*.h; do
     check_header_layer "$hdr" "host" "(vstd/|sys0/|hw/)" \
         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/host/include"
 done

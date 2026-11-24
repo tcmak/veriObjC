@@ -19,7 +19,7 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
 
     # Direction 1: Must compile 100% cleanly under stock Clang 23 (-Werror)
     STOCK_OUT=$(clang-23 -std=gnu23 -fblocks -fobjc-exceptions -Werror \
-                         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" \
+                         -I"$REPO_ROOT/rt/include" -I"$REPO_ROOT/vstd/include" -I"$REPO_ROOT/sys0/include" -I"$REPO_ROOT/host/include" \
                          -fsyntax-only "$corpus_file" 2>&1) || {
         echo "[FAIL] Corpus file $base_name did NOT compile cleanly under stock Clang 23 (-Werror)!"
         echo "$STOCK_OUT"
@@ -98,6 +98,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_unknown_veriobjc_annotate.m)
             EXPECTED_DIAG="Unknown VeriObjC annotation"
             ;;
+        valid_objc_host_io_outside_cold.m)
+            EXPECTED_DIAG="@cold function 'veriobjc_host_load_file_staged' cannot be called from non-@cold function"
+            ;;
         valid_objc_unchecked_vresult.m)
             EXPECTED_DIAG="Unchecked vresult access"
             ;;
@@ -156,6 +159,7 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
                              -I"$REPO_ROOT/rt/include" \
                              -I"$REPO_ROOT/vstd/include" \
                              -I"$REPO_ROOT/sys0/include" \
+                             -I"$REPO_ROOT/host/include" \
                              -fsyntax-only "$corpus_file" 2>&1); then
         echo "[FAIL] Corpus file $base_name unexpectedly SUCCEEDED under VeriObjC plugin!"
         exit 1

@@ -804,6 +804,13 @@ void VeriObjCVisitor::inspectCallSiteEffects(const CallExpr *CE, const FunctionD
             << Name;
         return;
     }
+    if (hasVeriObjCAnnotation(CalleeFD, "objc_cold") && !IsColdCaller) {
+        reportError(
+            CE->getExprLoc(),
+            "VeriObjC Violation: @cold function '%0' cannot be called from non-@cold function '%1'; mark the caller 'veriobjc_cold'."
+        ) << Name << CallerFD->getName();
+        return;
+    }
     if (!IsNolatency && !IsPure) return;
 
     if (Eff == "@blocking") {
