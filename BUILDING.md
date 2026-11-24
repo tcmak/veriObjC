@@ -30,11 +30,14 @@ Run the following commands from the repository root:
 # 1. Configure the CMake build directory
 cmake -B build -G "Unix Makefiles" -DCMAKE_C_COMPILER=clang-23 -DCMAKE_CXX_COMPILER=clang++-23
 
-# 2. Build all targets (micro-runtime tests & Clang plugin)
+# 2. Build all targets (micro-runtime archive, unit tests, Clang plugin & build/bin/veriobjc-cc)
 cmake --build build
 
-# 3. Run all test suites
+# 3. Run all 7 test suites
 ctest --test-dir build --output-on-failure
+
+# 4. (Optional) Install a self-contained, relocatable VeriObjC SDK prefix
+cmake --install build --prefix "$HOME/.local"
 ```
 
 ---
@@ -85,7 +88,25 @@ Verifies every file in `examples/banned/valid_objc_*.m` in both directions: firs
 
 ## ⚡ Compiling Code with the VeriObjC Toolchain
 
-### 1. Compiling with the Clang Plugin Activated
+### 0. Using the `veriobjc-cc` SDK Compiler Wrapper (Recommended)
+Both `./build/bin/veriobjc-cc` (in-tree) and `<PREFIX>/bin/veriobjc-cc` (after `cmake --install build --prefix <PREFIX>`) automatically configure `-std=gnu23 -fblocks`, load `libVeriObjCPlugin.so` (`veriobjc-check` + `-fpass-plugin` IR lowering), add the SDK include paths (`rt`, `vstd`, `sys0`, `hw`, `host`), and link `libveriobjc_rt.a` when producing executables (without `-lobjc`):
+
+```bash
+# Compile & link a standalone VeriObjC executable in one command
+./build/bin/veriobjc-cc -O2 -Werror examples/sealed_mixed_scope.m -o build/sealed_mixed_scope
+./build/sealed_mixed_scope
+
+# Include external C99 headers cleanly via -isystem
+./build/bin/veriobjc-cc -O2 -Werror -isystem ./tests/plugin/isystem_ext \
+                        -c examples/isystem_c99_frame_stage.m -o build/isystem_c99_frame_stage.o
+
+# Run Z3 QF_BV contract verification directly through veriobjc-cc
+./build/bin/veriobjc-cc --smt-verify --smt-report -Werror -fsyntax-only examples/vcontracts_bounds_proof.m
+```
+
+> **Note:** Passing `-fobjc-runtime=gnustep*` is explicitly rejected by `veriobjc-cc` because GNUstep ObjC runtime flags trigger an LLVM 23 ELF COMDAT backend crash and VeriObjC lowers all `@sealed` / `@final` dispatch statically without an Objective-C runtime.
+
+### 1. Compiling with Raw `clang-23` + Clang Plugin Flags
 To compile any Objective-C file while enforcing all VeriObjC language rules and ban filters (e.g., our audio DSP pipeline example):
 
 ```bash
@@ -211,8 +232,10 @@ llvm-cov-23 show ./build/cov_tests -instr-profile=build/cov.profdata \
 
 | Artifact | Location | Purpose |
 | :--- | :--- | :--- |
-| **Micro-Runtime Header** | `rt/include/veriobjc_runtime.h` | Freestanding data stacks, pools, and object layouts |
-| **Clang Plugin** | `build/libVeriObjCPlugin.so` | Clang 23 AST verification pass (`veriobjc-check`) |
+| **Micro-Runtime Header & Archive** | `rt/include/veriobjc_runtime.h`, `build/libveriobjc_rt.a` | Freestanding data stacks, pools, object layouts, and static runtime archive |
+| **SDK Compiler Driver** | `build/bin/veriobjc-cc` (`<PREFIX>/bin/veriobjc-cc`) | Drop-in compiler/linker wrapper injecting `veriobjc-check`, IR pass, headers, and `libveriobjc_rt.a` |
+| **Clang Plugin** | `build/libVeriObjCPlugin.so` | Clang 23 AST & LLVM IR verification/lowering plugin (`veriobjc-check`) |
+| **Host Staged I/O** | `host/include/veriobjc_host_io.h` | `@cold` bounded static-staging file loader (`veriobjc_host_load_file_staged`) |
 | **Unit Test Binary** | `build/unit_rt_tests` | CppUTest runner for micro-runtime |
 | **Plugin Test Runner** | `tests/plugin/run_plugin_tests.sh` | Automated positive/negative AST compiler test script |
 | **Execution Plan** | `plan.md` | Living checklist of completed and upcoming tasks |

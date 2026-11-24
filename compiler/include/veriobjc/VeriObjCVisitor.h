@@ -130,6 +130,7 @@ private:
     bool isInRuntimeHeader(clang::SourceLocation Loc) const {
         llvm::StringRef File = Context->getSourceManager().getFilename(Loc);
         return File.ends_with("veriobjc_runtime.h") ||
+               File.contains("/include/veriobjc/") ||
                File.contains("/rt/include/") ||
                File.contains("/vstd/include/") ||
                File.contains("/sys0/include/") ||

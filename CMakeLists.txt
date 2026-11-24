@@ -289,6 +289,53 @@ set_target_properties(VeriObjCPlugin PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}"
 )
 
+# ---------------------------------------------------------------------------
+# SDK Compiler Wrapper (veriobjc-cc) & Relocatable Install Layout (Task 6.0.1)
+# ---------------------------------------------------------------------------
+if(CMAKE_C_COMPILER MATCHES "clang")
+    set(VERIOBJC_CLANG_EXECUTABLE "${CMAKE_C_COMPILER}")
+else()
+    find_program(VERIOBJC_CLANG_EXECUTABLE NAMES clang-23 clang)
+    if(NOT VERIOBJC_CLANG_EXECUTABLE)
+        set(VERIOBJC_CLANG_EXECUTABLE "clang-23")
+    endif()
+endif()
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/veriobjc-cc.in"
+    "${CMAKE_BINARY_DIR}/bin/veriobjc-cc"
+    @ONLY
+    FILE_PERMISSIONS
+        OWNER_READ OWNER_WRITE OWNER_EXECUTE
+        GROUP_READ GROUP_EXECUTE
+        WORLD_READ WORLD_EXECUTE
+)
+
+install(PROGRAMS "${CMAKE_BINARY_DIR}/bin/veriobjc-cc"
+    DESTINATION bin
+)
+install(TARGETS VeriObjCPlugin
+    LIBRARY DESTINATION lib/veriobjc
+)
+install(TARGETS veriobjc_rt_static
+    ARCHIVE DESTINATION lib/veriobjc
+)
+install(DIRECTORY rt/include/
+    DESTINATION include/veriobjc/rt
+)
+install(DIRECTORY vstd/include/vstd
+    DESTINATION include/veriobjc
+)
+install(DIRECTORY sys0/include/sys0
+    DESTINATION include/veriobjc
+)
+install(DIRECTORY hw/include/hw
+    DESTINATION include/veriobjc
+)
+install(DIRECTORY host/include/
+    DESTINATION include/veriobjc/host
+)
+
 # Test target for plugin verification script
 add_test(NAME plugin_tests
     COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/tests/plugin/run_plugin_tests.sh ${CMAKE_BINARY_DIR}/libVeriObjCPlugin.so ${CMAKE_CURRENT_SOURCE_DIR}

@@ -1,0 +1,194 @@
+#!/usr/bin/env bash
+# veriobjc-cc — Self-contained compiler & linker driver for VeriObjC (Task 6.0.1)
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SDK_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Resolve relocatable installed SDK layout first; fall back to CMake build tree.
+if [ -f "$SDK_ROOT/lib/veriobjc/libVeriObjCPlugin.so" ] && [ -f "$SDK_ROOT/lib/veriobjc/libveriobjc_rt.a" ]; then
+    PLUGIN_SO="$SDK_ROOT/lib/veriobjc/libVeriObjCPlugin.so"
+    RT_ARCHIVE="$SDK_ROOT/lib/veriobjc/libveriobjc_rt.a"
+    SDK_INC_FLAGS=(
+        -I"$SDK_ROOT/include/veriobjc"
+        -I"$SDK_ROOT/include/veriobjc/rt"
+        -I"$SDK_ROOT/include/veriobjc/host"
+    )
+else
+    PLUGIN_SO="@CMAKE_BINARY_DIR@/libVeriObjCPlugin.so"
+    RT_ARCHIVE="@CMAKE_BINARY_DIR@/libveriobjc_rt.a"
+    SDK_INC_FLAGS=(
+        -I"@CMAKE_CURRENT_SOURCE_DIR@/rt/include"
+        -I"@CMAKE_CURRENT_SOURCE_DIR@/vstd/include"
+        -I"@CMAKE_CURRENT_SOURCE_DIR@/sys0/include"
+        -I"@CMAKE_CURRENT_SOURCE_DIR@/hw/include"
+        -I"@CMAKE_CURRENT_SOURCE_DIR@/host/include"
+    )
+fi
+
+CLANG_BIN="${VERIOBJC_CLANG:-}"
+if [ -z "$CLANG_BIN" ]; then
+    if [ -x "@VERIOBJC_CLANG_EXECUTABLE@" ]; then
+        CLANG_BIN="@VERIOBJC_CLANG_EXECUTABLE@"
+    elif command -v clang-23 >/dev/null 2>&1; then
+        CLANG_BIN="$(command -v clang-23)"
+    fi
+fi
+
+if [ -z "$CLANG_BIN" ] || ! command -v "$CLANG_BIN" >/dev/null 2>&1; then
+    echo "veriobjc-cc: error: clang-23 executable not found (set VERIOBJC_CLANG=/path/to/clang-23)." >&2
+    exit 1
+fi
+
+print_help() {
+    cat <<EOF
+Usage: veriobjc-cc [veriobjc-options] [clang-options] <inputs>...
+
+VeriObjC closed-world compiler driver wrapping Clang 23 + libVeriObjCPlugin.so + libveriobjc_rt.a.
+
+VeriObjC Verification & Audit Flags:
+  --smt-verify               Fail compilation on violated @post, timeout, or missing Z3
+  --smt-report               Emit per-function Z3 QF_BV contract discharge status
+  --smt-timeout-ms=<ms>      Per-function Z3 timeout in milliseconds (default: 2000)
+  --z3-path=<path>           Override path to z3 (>= 4.8.12) executable
+  --effects-report           Emit per-function surviving effect report
+  --branch-report            Emit proven / hinted / unproven branch report
+  --mono-report              Emit generic/block monomorphization budget report
+  --export-header-stdout     Emit C ABI header for @export functions to stdout
+  --version                  Display veriobjc-cc and underlying Clang version
+  -h, --help                 Display this help message
+
+Environment:
+  VERIOBJC_CLANG             Override underlying clang-23 binary (current: $CLANG_BIN)
+EOF
+}
+
+if [ "$#" -eq 0 ]; then
+    print_help >&2
+    exit 1
+fi
+
+PLUGIN_ARGS=()
+USER_ARGS=()
+HAS_STD_FLAG=0
+HAS_BLOCKS_FLAG=0
+NO_CODEGEN=0
+NO_LINK=0
+NO_RT_LINK=0
+HAS_INPUT=0
+
+add_plugin_arg() {
+    PLUGIN_ARGS+=(-Xclang -plugin-arg-veriobjc-check -Xclang "$1")
+}
+
+i=1
+while [ "$i" -le "$#" ]; do
+    arg="${!i}"
+    case "$arg" in
+        -h|--help)
+            print_help
+            exit 0
+            ;;
+        --version)
+            echo "veriobjc-cc 0.1.0 (VeriObjC Closed-World SDK)"
+            "$CLANG_BIN" --version | head -n 1
+            echo "Plugin:  $PLUGIN_SO"
+            echo "Runtime: $RT_ARCHIVE"
+            exit 0
+            ;;
+        -fobjc-runtime=gnustep*)
+            echo "veriobjc-cc: error: '$arg' is not supported: GNUstep ObjC runtime flags trigger an LLVM 23 ELF COMDAT backend crash, and VeriObjC lowers all @sealed/@final dispatch statically without an Objective-C runtime (omit '$arg' and '-lobjc')." >&2
+            exit 1
+            ;;
+        --smt-verify|--smt-report|--effects-report|--branch-report|--mono-report|--export-header-stdout|--smt-timeout-ms=*|--z3-path=*)
+            add_plugin_arg "$arg"
+            ;;
+        --smt-timeout-ms|--z3-path)
+            if [ "$i" -ge "$#" ]; then
+                echo "veriobjc-cc: error: missing value after '$arg'" >&2
+                exit 1
+            fi
+            i=$((i + 1))
+            next_val="${!i}"
+            add_plugin_arg "${arg}=${next_val}"
+            ;;
+        -std=*)
+            HAS_STD_FLAG=1
+            USER_ARGS+=("$arg")
+            ;;
+        -fblocks|-fno-blocks)
+            HAS_BLOCKS_FLAG=1
+            USER_ARGS+=("$arg")
+            ;;
+        -E|-fsyntax-only|-M|-MM)
+            NO_CODEGEN=1
+            NO_LINK=1
+            USER_ARGS+=("$arg")
+            ;;
+        -c|-S|-emit-llvm)
+            NO_LINK=1
+            USER_ARGS+=("$arg")
+            ;;
+        -nostdlib|-r|-shared)
+            NO_RT_LINK=1
+            USER_ARGS+=("$arg")
+            ;;
+        -o|-I|-isystem|-iquote|-idirafter|-include|-L|-l|-D|-U|-MF|-MT|-MQ|-Xclang|-mllvm|-target|--target|-x)
+            USER_ARGS+=("$arg")
+            if [ "$i" -lt "$#" ]; then
+                i=$((i + 1))
+                USER_ARGS+=("${!i}")
+            fi
+            ;;
+        -*)
+            USER_ARGS+=("$arg")
+            ;;
+        *)
+            HAS_INPUT=1
+            USER_ARGS+=("$arg")
+            ;;
+    esac
+    i=$((i + 1))
+done
+
+if [ ! -f "$PLUGIN_SO" ]; then
+    echo "veriobjc-cc: error: VeriObjC plugin shared library not found at '$PLUGIN_SO'." >&2
+    exit 1
+fi
+
+CMD=("$CLANG_BIN")
+if [ "$HAS_STD_FLAG" -eq 0 ]; then
+    CMD+=(-std=gnu23)
+fi
+if [ "$HAS_BLOCKS_FLAG" -eq 0 ]; then
+    CMD+=(-fblocks)
+fi
+
+CMD+=(
+    -Xclang -load -Xclang "$PLUGIN_SO"
+    -Xclang -add-plugin -Xclang veriobjc-check
+)
+
+if [ "${#PLUGIN_ARGS[@]}" -gt 0 ]; then
+    CMD+=("${PLUGIN_ARGS[@]}")
+fi
+
+if [ "$NO_CODEGEN" -eq 0 ]; then
+    CMD+=("-fpass-plugin=$PLUGIN_SO")
+fi
+
+CMD+=("${SDK_INC_FLAGS[@]}")
+
+if [ "${#USER_ARGS[@]}" -gt 0 ]; then
+    CMD+=("${USER_ARGS[@]}")
+fi
+
+if [ "$HAS_INPUT" -eq 1 ] && [ "$NO_LINK" -eq 0 ] && [ "$NO_RT_LINK" -eq 0 ]; then
+    if [ ! -f "$RT_ARCHIVE" ]; then
+        echo "veriobjc-cc: error: VeriObjC runtime archive not found at '$RT_ARCHIVE'." >&2
+        exit 1
+    fi
+    CMD+=("$RT_ARCHIVE")
+fi
+
+exec "${CMD[@]}"

@@ -77,6 +77,7 @@ Toolchain ready (no test framework). Environment for this session:
 Next steps (BUILDING.md has the full guide):
   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
   cmake --build build
+  cmake --install build --prefix "\$HOME/.local"   # installs bin/veriobjc-cc, lib/veriobjc/, include/veriobjc/
 
 To run the test suites later: re-run scripts/install.sh without --no-cpputest.
 EOF
@@ -91,5 +92,6 @@ Next steps (BUILDING.md has the full guide):
   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCPPUTEST_ROOT="$DEPS_DIR/cpputest"
   cmake --build build
   ctest --test-dir build --output-on-failure
+  cmake --install build --prefix "\$HOME/.local"   # optional: install self-contained veriobjc-cc SDK
 EOF
 fi

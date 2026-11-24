@@ -35,6 +35,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 #   -DVERIOBJC_REQUIRE_Z3=OFF          (allow configuring without Z3 installed)
 cmake --build build
 ctest --test-dir build --output-on-failure
+cmake --install build --prefix "$HOME/.local"   # optional: install self-contained veriobjc-cc SDK
 ```
 
 ---
@@ -121,6 +122,7 @@ Toolchain ready (no test framework). Environment for this session:
 Next steps (BUILDING.md has the full guide):
   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
   cmake --build build
+  cmake --install build --prefix "\$HOME/.local"   # installs bin/veriobjc-cc, lib/veriobjc/, include/veriobjc/
 
 To run the test suites later: re-run scripts/install.sh without --no-cpputest.
 EOF
@@ -135,6 +137,7 @@ Next steps (BUILDING.md has the full guide):
   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCPPUTEST_ROOT="$DEPS_DIR/cpputest"
   cmake --build build
   ctest --test-dir build --output-on-failure
+  cmake --install build --prefix "\$HOME/.local"   # optional: install self-contained veriobjc-cc SDK
 EOF
 fi
 ```
@@ -162,6 +165,7 @@ The CTest gate names (from the plan) that must appear and pass **when CppUTest i
 | `ban_corpus_tests` | Dual-direction ban corpus: clean under stock Clang, rejected under the plugin |
 | `vstd_cohesion_tests` | Header layer table, `-ffreestanding -mno-sse` `rt/` audit, and `--gc-sections` minimal-binary gate |
 | `e2e_sealed_polymorphism_tests` | Standalone `@sealed` base-pointer dispatch & mixed-size `vspan` scope-reset audit (zero `-lobjc`) |
+| `veriobjc_cc_sdk_tests` | Relocatable `cmake --install` SDK layout & `veriobjc-cc` end-to-end compilation/Z3/GNUstep-guard gate |
 
 ---
 

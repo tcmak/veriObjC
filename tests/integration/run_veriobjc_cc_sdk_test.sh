@@ -70,21 +70,23 @@ cat > "$TMP_WORK/sdk_dogfood.m" <<'EOF'
 #include <vstd/span.h>
 #include <synth_c99_frame.h>
 
-__attribute__((objc_root_class, objc_sealed))
+__attribute__((objc_root_class))
+__attribute__((objc_sealed))
 @interface FrameStageNode {
 @public
-    struct veriobjc_sealed_header _sealed_hdr;
+    uint32_t stage_id;
 }
 - (uint32_t)transformWord:(uint32_t)word;
 @end
 
 @implementation FrameStageNode
 - (uint32_t)transformWord:(uint32_t)word {
-    return word;
+    return word + stage_id;
 }
 @end
 
-__attribute__((objc_sealed, objc_final))
+__attribute__((objc_sealed))
+__attribute__((objc_final))
 @interface AddBiasStage : FrameStageNode {
 @public
     uint32_t bias;
@@ -98,7 +100,8 @@ __attribute__((objc_sealed, objc_final))
 }
 @end
 
-__attribute__((objc_sealed, objc_final))
+__attribute__((objc_sealed))
+__attribute__((objc_final))
 @interface XorMixStage : FrameStageNode {
 @public
     uint32_t mask_lo;
@@ -134,12 +137,14 @@ static uint32_t sum_payload_bytes(uint32_t seq_no, ConstByteSpan payload) {
 
 static uint32_t run_sealed_stages(struct veriobjc_stack *arena, uint32_t seed) {
     VERIOBJC_SCOPED_STACK(arena);
-    AddBiasStage *s0 = veriobjc_alloc_sealed(arena, AddBiasStage);
-    XorMixStage  *s1 = veriobjc_alloc_sealed(arena, XorMixStage);
+    AddBiasStage *s0 = veriobjc_alloc_sealed(AddBiasStage, arena);
+    XorMixStage  *s1 = veriobjc_alloc_sealed(XorMixStage, arena);
     if (!s0 || !s1) {
         return 0u;
     }
+    s0->stage_id = 1u;
     s0->bias     = 8u;
+    s1->stage_id = 2u;
     s1->mask_lo  = 0x0Fu;
     s1->mask_hi  = 0x0Fu;
     s1->tag_salt = 2u;
@@ -158,7 +163,7 @@ static uint32_t run_sealed_stages(struct veriobjc_stack *arena, uint32_t seed) {
 
 veriobjc_cold
 int main(int argc, const char **argv) {
-    if (argc < 2 || veriobjc_rt_abi_version() != 1u) {
+    if (argc < 2 || veriobjc_rt_abi_version != 1u) {
         return 2;
     }
 

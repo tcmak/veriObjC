@@ -942,6 +942,7 @@ static inline veriobjc_tape_error_t veriobjc_tape_validate_v1(
     return VERIOBJC_TAPE_OK;
 }
 
+extern const uint32_t veriobjc_rt_abi_version;
 
 #ifdef __cplusplus
 }
