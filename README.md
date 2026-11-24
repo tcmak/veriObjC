@@ -2,7 +2,7 @@
 
 **A hardened, formally verifiable dialect of Objective-C for systems that cannot blink: bare metal, kernels, FPGAs, and ultra-low-latency engines.**
 
-> **Status: Proof of Concept.** VeriObjC is an active research project, not a production language. Zero production hours. 
+> **Status: Proof of Concept.** VeriObjC is an active research project, not a production language. Zero production hours.
 
 ---
 
@@ -38,23 +38,57 @@ The catch: VeriObjC **cannot host runtime-loaded plugins, reflection, or an open
 ## 🛠️ How It Works
 
 ```
-[ VeriObjC source ] ──> [ Clang AST plugin ] ──> [ SMACK/Z3 proof ] ──> [ Bare-metal binary ]
-                            (bans, ownership,              (bounded-path            (linked with the
-                             lowering, reports)             memory & contracts)       freestanding micro-runtime)
+[ VeriObjC source ] ──> [ veriobjc-cc (Clang 23 + Plugin) ] ──> [ Z3 QF_BV proof ] ──> [ Freestanding binary ]
+                            (AST bans, CFG ownership,              (bounded-path           (zero libobjc, linked
+                             IR static dispatch, reports)           @pre/@post contracts)    with libveriobjc_rt.a)
 ```
 
-1. **Subtraction first.** A Clang plugin rejects every runtime-dependent feature at the AST level, with a named diagnostic for each ban.
-2. **Then lowering.** Message sends become direct calls; sealed hierarchies become tag-switched dispatch functions; `@pre`/`@post` contracts become `QF_BV` proof obligations.
+1. **Subtraction first.** A Clang AST plugin (`libVeriObjCPlugin.so`) rejects every runtime-dependent feature at compile time, with a named diagnostic for each ban.
+2. **Then lowering.** An LLVM IR pass rewrites message sends on `@sealed`/`@final` hierarchies into direct calls and tag-switched dispatch tables — zero `objc_msgSend`, zero `-lobjc`.
 3. **Then proof.** Bounded-path `@pre`/`@post` contract verification via Z3 (`--smt-verify` / `--smt-report`) over exact C bit-widths *before* the binary runs, emitting concrete counterexample witnesses on violation and failing closed on timeout.
-4. **Then a micro-runtime.** A freestanding `libobjc` replacement in auditable C: no locks, no string tables, no `libobjc` dependency, no libc.
+4. **Then a micro-runtime.** A freestanding `libobjc` replacement (`libveriobjc_rt.a` + inline headers) in auditable C: no locks, no string tables, no `libobjc` dependency, no libc.
 
 **Toolchain decision record** (why four languages): the Clang plugin API forces C++; the micro-runtime and `vstd` are C (freestanding, dogfooding the language's own memory rules); the package manager `vpm` is Go (bootstrap-independent); type-rule prototyping is OCaml/Haskell (throwaway).
 
 ---
 
+## 🚀 Quickstart (Build, Install & Prove)
+
+Bootstrap the reference Linux toolchain (Clang/LLVM 23, Z3 ≥ 4.8.12, CppUTest), run the 7 CTest suites, and install the relocatable `veriobjc-cc` SDK:
+
+```bash
+# 1. Bootstrap prerequisites (Ubuntu/Debian)
+bash scripts/install.sh
+
+# 2. Configure, build, and verify all 7 test suites
+CC=clang-23 CXX=clang++-23 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j"$(nproc)"
+ctest --test-dir build --output-on-failure
+
+# 3. Install the self-contained SDK (veriobjc-cc, plugin, runtime archive, headers)
+cmake --install build --prefix ~/.local
+```
+
+With `~/.local/bin` on `PATH`, `veriobjc-cc` compiles VeriObjC sources directly without manual `-Xclang` plugin flags or `-lobjc`:
+
+```bash
+# Compile & run a zero-heap, zero-objc_msgSend @sealed hierarchy
+veriobjc-cc -O2 -Werror examples/sealed_mixed_scope.m -o /tmp/sealed_demo
+/tmp/sealed_demo
+
+# Discharge @pre/@post bit-vector contracts at compile time via Z3 QF_BV
+veriobjc-cc --smt-verify --smt-report -fsyntax-only examples/vcontracts_bounds_proof.m
+
+# Interoperate with freestanding C99 single-header libraries via -isystem + @cold staging
+veriobjc-cc -O2 -Werror -isystem tests/plugin/isystem_ext \
+  examples/isystem_c99_frame_stage.m -o /tmp/c99_interop_demo
+```
+
+---
+
 ## 💡 A Taste of the Language
 
-A market-data parser. Scratch lives on a grow-only data stack — the reference captured by the first `push` stays valid a million pushes later, and the whole buffer is freed with **one store** at scope exit. Errors return across multiple frames with `return err from parse`, statically checked, no unwinder:
+A market-data parser (conceptual surface syntax; see [`examples/`](examples/) for current macro-annotated runnable sources). Scratch lives on a grow-only data stack — the reference captured by the first `push` stays valid a million pushes later, and the whole buffer is freed with **one store** at scope exit. Errors return across multiple frames with `return err from parse`, statically checked, no unwinder:
 
 ```objc
 __attribute__((objc_sealed))
@@ -79,19 +113,19 @@ __attribute__((objc_sealed))
 @end
 ```
 
-Full examples: [`examples/`](examples/) — fixed-point audio processing, the market-data parser above, and a matmul-free ternary-inference block (`objc_hw_kernel` direct and transitive call-graph zero-multiplication check enforced).
+Full runnable examples in [`examples/`](examples/) include `@sealed` mixed-size scope dispatch (`sealed_mixed_scope.m`), Z3 bounds proofs (`vcontracts_bounds_proof.m`), `@cold` static file staging (`host_staged_file_loader.m`), `-isystem` freestanding C99 interop (`isystem_c99_frame_stage.m`), fixed-point audio processing, and matmul-free ternary inference (`objc_hw_kernel` direct and transitive call-graph zero-multiplication check enforced).
 
 ---
 
 ## 🚫 What Gets Banned (and How You Know)
 
-VeriObjC's design lives in its *impossible list*: 30 constructs rejected at compile time, each with a named diagnostic and a dedicated test — **a ban that isn't tested isn't a ban**.
+VeriObjC's design lives in its *impossible list*: 30+ constructs rejected at compile time, each with a named diagnostic and a dedicated test — **a ban that isn't tested isn't a ban**.
 
 | Category | Count | Highlights |
 | :--- | :--- | :--- |
 | Dynamic runtime | 13 | `id`, `NSObject`, categories, KVC/KVO, swizzling, nil messaging, GCD spawns, `@try`/`@catch` |
-| Memory & ownership | 8 | Escaping data-stack refs, non-flat channel payloads, allocator mixing, heap in `@nolatency` |
-| Metaprogramming | 7 | Unconstrained generics, SFINAE-style probing, un-fueled compile-time evaluation |
+| Memory & ownership | 8 | Escaping data-stack refs, FFI stack-ref export, non-flat channel payloads, allocator mixing, heap in `@nolatency` |
+| Metaprogramming & attributes | 8 | Unconstrained generics, SFINAE-style probing, un-fueled compile-time evaluation, unrecognized `annotate("veriobjc_*")` spellings |
 | Hardware streams | 2 | Width-mismatched `zip`, context overflow beyond declared `ContextCap` |
 
 The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated in CI: every file must compile `-Werror` clean under stock Clang *and* be rejected by the plugin with the exact named diagnostic. A file that isn't valid Objective-C proves nothing.
@@ -101,7 +135,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 ## 🧪 Verification & Measurement Discipline
 
 - **Bounded-path proofs, honestly stated.** `@pre`/`@post` contracts on bounded pure/FFI functions are discharged at compile time by Z3 (`>= 4.8.12`) over exact C two's-complement bit-vectors (`QF_BV`) via `--smt-verify` and `--smt-report` (`Z3_UNSAT_PROVEN`, `Z3_SAT_COUNTEREXAMPLE` with concrete witness values, or fail-closed `Z3_UNKNOWN_TIMEOUT`). We target bounded-path verification — *not* mathematical totality (undecidable) and *not* Rust's whole-language soundness (a different, per-function, open-world guarantee).
-- **Effects are typed.** `@alloc`/`@io`/`@blocking`/`@fence`/`@shared-retain` are part of every signature; an effectful call inside a `@nolatency` loop is a compile error.
+- **Effects are typed.** `@alloc`/`@io`/`@blocking`/`@fence`/`@shared-retain` and `@cold` init quarantines are part of every signature; an effectful or `@cold` call inside a `@nolatency` path is a compile error.
 - **Reports are CI artifacts.** `--effects-report`, `--branch-report`, and `--mono-report` are diffed per build: a hot loop that *gains* an effect or an unproven branch fails review even when all tests pass.
 - **No number, no claim.** Latency budgets are versioned artifacts; benchmarks publish losses alongside wins, matching the measurement discipline common among HFT firms.
 
@@ -127,7 +161,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 | :--- | :--- |
 | [`docs/veriobjc-specification.md`](docs/veriobjc-specification.md) | Architectural specification: pipeline, memory model, syntax inventions |
 | [`docs/veriobjc-poc-execution-plan.md`](docs/veriobjc-poc-execution-plan.md) | PoC execution plan, language decision record, acceptance criteria |
-| [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) | Ban Registry (30 bans, diagnostics, tests) + rejection corpus rules |
+| [`docs/veriobjc-ban-list.md`](docs/veriobjc-ban-list.md) | Ban Registry (30+ bans, diagnostics, tests) + rejection corpus rules |
 | [`docs/veriobjc-foundational-library.md`](docs/veriobjc-foundational-library.md) | `vstd` design: strings, stacks, variants, channels, atomics, FFI matrix |
 | [`docs/veriobjc-advanced-substrate.md`](docs/veriobjc-advanced-substrate.md) | vmeta metaprogramming, vregex, `veriStream` fixed-point streaming substrate |
 | [`docs/veriobjc-type-system-and-metaprogramming-vmeta.md`](docs/veriobjc-type-system-and-metaprogramming-vmeta.md) | Nominal local type inference (`auto`), constrained `vgeneric`, `vconstexpr`, `vregex` |
@@ -149,7 +183,7 @@ The **Valid-ObjC Rejection Corpus** (`examples/banned/`) is dual-direction gated
 ## 🔗 See Also
 
 - [`INSTALL.md`](INSTALL.md) — toolchain bootstrap on a fresh machine
-- [`BUILDING.md`](BUILDING.md) — toolchain setup (Clang 23, CppUTest, CMake) and CLI guide
+- [`BUILDING.md`](BUILDING.md) — toolchain setup (Clang 23, CppUTest, CMake) and `veriobjc-cc` CLI guide
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — TDD workflow: no task merges without its red test first
 - [`examples/README.md`](examples/README.md) — guide to positive examples and the Valid-ObjC Rejection Corpus
 - [`docs/coming-to-veriobjc-a-guide-by-programming-background.md`](docs/coming-to-veriobjc-a-guide-by-programming-background.md) — "Coming to VeriObjC" from ObjC, C++, Rust, or Go

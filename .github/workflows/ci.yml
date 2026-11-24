@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       LLVM_VERSION: "23"
-      VERIOBJC_DEPS: ${{ runner.temp }}/veriobjc-deps
+      DEBIAN_FRONTEND: noninteractive
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -24,12 +24,16 @@ jobs:
           key: ${{ runner.os }}-cpputest-master-v1
 
       - name: Install LLVM 23, Z3, and CppUTest via bootstrap script
+        env:
+          VERIOBJC_DEPS: ${{ runner.temp }}/veriobjc-deps
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y lsb-release wget software-properties-common gnupg z3
           bash scripts/install.sh
 
       - name: Configure and build with CMake
+        env:
+          VERIOBJC_DEPS: ${{ runner.temp }}/veriobjc-deps
         run: |
           z3 --version
           cmake -S . -B build \
