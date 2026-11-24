@@ -99,6 +99,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_hw_kernel_extern_call.m)
             EXPECTED_DIAG="closed-world 0-DSP verification requires statically visible callee bodies"
             ;;
+        valid_objc_raw_cast_to_sealed.m)
+            EXPECTED_DIAG="Banned raw or unchecked pointer cast to @sealed/@final class"
+            ;;
         valid_objc_unsealed_inheritance.m)
             EXPECTED_DIAG="Polymorphic class"
             ;;
