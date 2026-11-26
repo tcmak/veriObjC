@@ -14,6 +14,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 * **Build System:** CMake + Make / Ninja (portable `find_package(LLVM REQUIRED CONFIG)`)
 * **Version Control:** Git (`main` / `master`, standalone repository with zero external submodules)
 * **CLI & Build Guide:** See [`BUILDING.md`](./BUILDING.md) for command line instructions.
+* **Planned (Draft):** Phase 7 — 7a Low-Latency Library Kit (zero compiler changes), 7b Reference Demonstration (dogfooding the kit; two-pass v1/v2 measurement around Phase 8), 7c Language-Property Hardening (gated on 7b evidence), 7d Dialect Spec & Stability Governance (order-independent; Hare-inspired), 7e Computational-Finance Lessons Applied (blocklist allocator, false-sharing discipline, checkpointed replay, cold-side batch executor, parallel determinism; rides 7a/7b). **Phase 8 (Draft) — SMT-Backed Refinement & Index Types (`QF_BV`):** middle-ground dependent-type ergonomics, registered under Phase 7d gates (appended at the end of this file; wording pending a planning pass)
 
 ---
 
@@ -280,3 +281,175 @@ Real-world external consumer dogfooding and soundness audits surfaced ten usabil
   - Enforces per-package instantiation bytes (Task 2.8.5), `vregex` DFA table bytes, and static arena budgets at build time.
 - [ ] **Task 6.3: CI Survivor Report Archival & Diffing**
   - Automates per-commit `--effects-report`, `--branch-report`, and `--mono-report` artifact diffing via `rt_survivor_diff_audit` (Task 4.2).
+
+---
+## 🧵 Phase 7 (Draft): Low-Latency Library Kit (7a), Reference Demonstration (7b), Language-Property Hardening (7c), Spec/Stability Governance (7d) & Computational-Finance Lessons (7e)
+*(Informed by real-world "wrap-the-OS" seam engineering practice (time, user-space networking, CPU pinning, custom memory allocators, busy-poll event loops, async persistence): the first tier is **library-only** — headers over already-shipped `rt/`/`vstd/`/`sys0/` primitives with zero compiler changes — so anyone can assemble a low-latency system from working examples; a reference application (Block 7b) dogfoods the kit end-to-end and produces the evidence; language-property hardening (Block 7c) is gated on that evidence rather than on waiting for external adoption. Type-vs-check scorecard: capability descriptors become opaque types now; `@nolatency` is documented as an effect on the function type (promotion deferred to 7c); `@steady`, `lmax`, and `@spin` remain checks; `vticks`/`vns` are already types. Per-task red/green with ban-corpus rows unchanged; annotations are earned by library usage, not designed upfront. Block 7d (dialect-spec freeze, stability governance, and registry/ABI CI automation, inspired by Hare's spec-first and release-policy discipline) is **order-independent** — it may start in any wave ahead of 7a–7c, and Block 7c promotions additionally require a ≥Stable tier grade from Task 7d.2.)*
+
+### Block 7a — Low-Latency Library Kit (zero compiler changes; `<sys0/`, `<vstd/`, `host/`)
+
+- [ ] **Task 7a.1: Boot Calibration & Typed Clock Domains (`<sys0/time.h>`)**
+  - One-time `@cold` calibration pinning the cycles→nanoseconds multiplier/offset at boot; strong types (`vticks`, `vns`, `<vstd/strong.h>` discipline) make cross-clock-domain mixing a compile error; documented drift/resolution contract per platform.
+  - All unit tests run on an injected virtual tick source instead of wall time (deterministic under simulation).
+- [ ] **Task 7a.2: Opaque Boot Capability Types (`vcore_set`, `varena_cap`, `vmap_cap`)**
+  - Nominal opaque structs with a private `payload_DoNotAccessDirectly` field: direct access rejection **reuses the existing `vatomic` plugin ban** (zero new mechanism) and only `@cold @io` boot functions (`<sys0/mem.h>` / `<sys0/mmu.h>`, platform shims) may produce them — pinned core sets, statically reserved arenas, hugepage/locked regions.
+  - Freestanding fallback: plain `veriobjc_stack` backing so CI stays hosted-toolchain-free and deterministic (mirrors the pure-CPU ternary fallback pattern, Task 5.7).
+  - Ban-corpus rows: `tests/plugin/negative/test_banned_capability_direct_access.m`, `test_banned_capability_forged_init.m`; valid: `test_valid_capability_boot_to_steady.m`.
+- [ ] **Task 7a.3: Hierarchical Timing Wheel & Deadlines (`<vstd/timer.h>`)**
+  - Constant-bounds timing wheel over `sys0_rdtsc` ticks; deadline objects consumable by the runloop and `veriobjc_spin_until`-style bounded waits; overflow/underflow fail closed with named diagnostics.
+- [ ] **Task 7a.4: Step-Based Runloop & Pollables (`<vstd/runloop.h>`)**
+  - The busy-poll event-loop engine as headers over the shipped Task 3.8 (`vspsc_channel`) / Task 3.11 (`vdma_ring`) / Task 7a.3 primitives: pollables compose into a deterministic `step()` loop whose per-step work is bounded (constant trip counts or `lmax`-documented bounds documented in the header contract).
+  - `@blocking` / `@io` / `@alloc` primitives inside the composed steady path are already rejected by the shipped Task 2.8.1 checks — the kit turns the "hot loop never contacts the OS" convention into normal library usage.
+- [ ] **Task 7a.5: Ring Traffic Journal & Bit-Exact Replay (`<vstd/journal.h>`, `host/`)**
+  - Content-addressed journal of SPSC-channel / DMA-ring events (VOBJ v1-style framing + FNV-1a, `veriobjc_tape_header` discipline); overhead bounded and self-declared in the header contract.
+  - Host replay harness: re-run from a journal snapshot and bit-compare the final `VOBJ v1` state; accept/reject fixture corpus `fixtures/journal_v1/{accept,reject}` with `.bin` + `.json` expectations (mirrors the Task 5.6b discipline); replay divergence is a named, fail-closed diagnostic.
+  - *Tier note:* in 7a, determinism is a **tested convention** (fixtures catch drift); the checked-property version is 7c.4.
+- [ ] **Task 7a.6: `vpm init --template=lowlatency` Starter Skeleton (rides Task 6.1)**
+  - A working end-to-end example composing 7a.1–7a.5: boot phase (`@cold` staging + capability reservation) → steady runloop with ring pair + timing wheel → journaling + offline replay; the onboarding artifact for "anyone can start a low-latency project."
+
+### Block 7b — Reference Demonstration: HFT-Shaped Feed-Handler Pipeline (Dogfooding the Kit)
+
+Rather than waiting for external adoption to validate Block 7a, the project builds its own demonstration: a self-contained, deterministic, HFT-shaped low-latency application assembled strictly from the 7a + 7e kit pieces. Its outputs — measurements, audit artifacts, and a friction log — are the evidence that gates Block 7c. (Portfolio precedent: the `vgeneric` frictions document, VG-001…VG-006; Phase 5 end-to-end integration examples, including the Task 5.2 `order_book_snapshot` lineage.)
+
+- [ ] **Task 7b.1: Reference Application Definition & Steady-Path Core (`examples/lowlatency/pipeline.m`)**
+  - A deterministic market-data feed decoder → order-book state machine → outbound ring pipeline: the domain the OS-seam practices come from, composed strictly from 7a + 7e kit pieces (7e.1 blocklist as the book's backing store, 7e.4 batch drain for cold-side work).
+  - Steady path: capability-reserved arena (7a.2), runloop `step()` with ring pair + timing-wheel deadlines (7a.3/7a.4), journaling (7a.5), virtual tick clock (7a.1) for determinism.
+  - Boot phase confined to `@cold @io` staging + capability reservation; the steady/core path stays freestanding-safe.
+- [ ] **Task 7b.2: Friction Log (`docs/veriobjc-lowlatency-frictions.md`)**
+  - Every sharp edge hit while building the pipeline gets a numbered, typed entry (LG-001…) recommending **promote / defer / reject** per Block 7c candidate; no silent workarounds (same discipline as the vgeneric frictions document).
+- [ ] **Task 7b.3: Measurement & Audit Artifacts (Gate Evidence)**
+  - Bench harness + latency gate (Tasks 4.1 / 4.3) p50/p99/p99.9 artifacts at a declared budget; steady-path audit trifecta (`nm` zero libc/syscall symbols, `llvm-objdump -d`, coverage); `--effects-report` diff clean (Tasks 4.2 / 6.3).
+  - Full-pipeline journal round-trip: run → journal → replay bit-exact, adding a pipeline golden to the `fixtures/journal_v1/` corpus (extends 7a.5).
+- [ ] **Task 7b.4: Block 7c Justification Memo**
+  - A written verdict per 7c candidate (effects → function types, `@steady` module gate, `lmax`/`@spin` checks, compiler-attested determinism) argued only from 7b evidence; a 7c task enters planning **only** when its memo row says "promote." Fail-closed by default: absence of evidence = defer.
+
+**Two-pass measurement model:** **v1** (this block) validates the 7a/7e library tier with the existing checks and feeds the 7b.4 memo; **v2** (Task 7b.5, after Phase 8) re-runs the same examples on the refinement-typed hot paths, so the v1→v2 artifact diff becomes Phase 8's zero-runtime-erasure evidence on a measured pipeline.
+
+- [ ] **Task 7b.5: Post-Phase-8 Re-Baseline (the v2 measurement pass)**
+  - Once Phase 8 Blocks 8.1–8.3 land: re-run the measured examples (and the pipeline) with `veriobjc_where` / `veriobjc_index` in the hot loops — same inputs, same declared budgets.
+  - Commit the v1→v2 artifact diff (bounds branches eliminated from the assembly, outputs byte-identical, cycle delta) as proof of zero-runtime-erasure on a real measured pipeline; extends Task 8.3.2's audit from a synthetic example to a full artifact.
+
+#### Examples roadmap (`examples/lowlatency/`; owned by Block 7b; wired into `run_examples_smoke_test.sh`, Task 5.1 lineage)
+
+Each example validates one belief veriObjC makes about the world, carries a one-line provenance comment naming its motivating source (all designs veriObjC-native — domain inspiration only, zero ported code).
+
+1. **`blocklist_orderbook`** (exercises 7e.1; continues the Task 5.2 `order_book_snapshot` lineage) — *v1*: price-level order book on `vblocklist` — growth-past-blocks pointer-survival audit, mark/rewind intraday scrollbacks, `VOBJ v1` snapshot round-trip re-fuzzed byte-by-byte. *Belief tested: pointer-stable growth without relocation is enforceable; arena wipe beats free; snapshots are mutation-hostile.*
+2. **`arena_trace_sweep`** (exercises 7e.1 + Task 2.8; motivator: Ch. 10 tape discipline) — *v1*: write-once op trace on the steady arena — forward record, backward zero-allocation sweep against a mark. *Belief tested: the arena's memory model natively supports evaluate-then-adjoint-sweep; `nm` proves nothing ever left the data stack.*
+3. **`false_sharing_bench`** (exercises 7e.2; motivator: Ch. 3.5 postmortem) **【measured: v1, re-measured v2】**: unpadded vs cache-line-padded partitioned counters through the Task 4.1/4.3 gate. *Belief tested: the padding annotation rule is worth having; the delta is the teaching number.*
+4. **`pipeline_batch_drain`** (exercises 7e.4; ships with its negative-corpus pair) — *v1*: hot steady runloop + `@cold @io`-quarantined OS-blocking drain worker over SPSC channels + return channel. *Belief tested: all waiting lives outside the hot path, and the plugin proves it.*
+5. **`pipeline_checkpoint_replay`** (exercises 7e.3) **【measured: may land in v2 — benefits most from 8.3.1 ghost indices】**: N virtual ticks → mark snapshots → reload mid-run checkpoint → bit-exact divergence-free replay against `fixtures/journal_v1/checkpoint/` goldens. *Belief tested: the world can be rewound to any mark, deterministically — the flagship demo.*
+6. **`parallel_partitioned_determinism`** (exercises 7e.5; motivator: Ch. 7 skip-ahead/partitioned-randomness design) **【measured: v1, re-measured v2】**: four workers, disjoint `VERIOBJC_SCOPED_STACK` arenas, worker-index-seeded inputs; 4-worker output bit-identical to the serial run; zero locks, `nm`-audited. *Belief tested: determinism by construction, not synchronization — direct 7c.4 evidence.*
+7. **`model_product_static_dispatch`** (exercises Task 2.3; motivator: Ch. 6 template-method model/product decoupling) — *any wave*: the same decoupling shape via `@sealed`/`@final` + static dispatch lowering. *Belief tested: object-oriented structure survives with zero-dispatch, zero-runtime code (`llvm-objdump -d` sweep).*
+
+*Build order: v1 — 1 and 4 first (the pipeline's components), then 2; measured examples land in their marked pass; provenance notes attribute the motivating chapter without embedding sourced code.*
+
+### Block 7c — Language-Property Hardening (gated on Block 7b evidence)
+
+- [ ] **Task 7c.1: Effect-Carrying Function Types (promote `@nolatency` from attribute to function-type property — gated by the 7b.4 memo)**
+  - Function types carry effect bounds (Koka-style); transitive callee restriction then falls out of ordinary type compatibility, and the shipped Task 2.8.1 call-graph check becomes the migration bridge rather than a new enforcement.
+- [ ] **Task 7c.2: `@steady` Module-Level Phase Gate (gated by the 7b.4 memo)**
+  - A module-level qualifier (nearest analogue: `no_std`) turning the boot→steady one-way barrier into a checked property: after the barrier, OS-facing operations are rejected statically with the diagnostic naming the `@cold @io` module that must own them; capability values (7a.2) are the only sanctioned boot→steady channel.
+  - The checked conventions may ship first as optional ban-corpus rows during 7a/7b: `test_banned_steady_thread_spawn.m`, `test_banned_steady_sched_affinity.m`, `test_banned_steady_sleep.m`, `test_banned_steady_cold_call.m`.
+- [ ] **Task 7c.3: Bounded-Loop & Bounded-Spin Checks Promoted (optional — gated by the 7b.4 memo)**
+  - `lmax` loop bounds and the `@spin` worst-case budget promote from documented 7a.4 header contracts to enforced checks in `CfgDataflowChecks.cpp` (precedent: the `vasync_task_is_ready` busy-wait ban, Task 3.12); ban-corpus rows unchanged in name.
+- [ ] **Task 7c.4: Determinism as Checked Property (optional — gated by the 7b.4 memo)**
+  - For programs whose hot path is effect-bounded (7c.1) and whose time reads flow through injected tick sources: registered journaling + replay verifiability becomes a compiler-attested property, closing the tier gap left open by 7a.5.
+
+### Block 7d — Dialect Specification, Stability Governance & Registry Automation (order-independent; Hare-inspired)
+
+*(Rationale: Hare's most transferable practices are its normative language specification, its written release policy, and freestanding-as-first-class documentation. veriObjC today *is* `plan.md` + docs + the Task 2.7.1 ban registry; this block turns that into governed, CI-checked artifacts so the verification claim outlives any single contributor or model agent.)*
+
+- [ ] **Task 7d.1: `VeriObjC Dialect Specification v0` (`docs/spec/dialect-v0/`)**
+  - Normative doc set for the accepted language subset: each plugin check recorded as a machine-readable descriptor (check id, scope: AST/CFG/IR/link-time, predicate summary, diagnostic id + exact rendered text, ban-corpus test ids) with prose tables generated *from* the descriptors (single source of truth, no drift between prose and registry).
+  - Freeze ritual mirrors the TTAPE v1.0 discipline: re-derivable content is generated; hand-written parts are owned; supersession adds versions, never edits in place.
+- [ ] **Task 7d.2: Stability Matrix & Release Policy (`docs/stability.md`)**
+  - Four tiers per subsystem/decision point — **Frozen / Stable / Experimental / Provisional** — over `rt/` headers, `vstd/` contract namespaces, `sys0/`, plugin checks, `veriobjc-cc` flags, and file-format artifacts (`VOBJ v1`; fixture corpora accompany their tier).
+  - Written promise rules (what migrates and what may break between releases); the README's "clearly marked experimental" markings point here; a machine-readable manifest (`stability.yaml`) expresses grades for CI consumption.
+- [ ] **Task 7d.3: Diagnostic & Ban-Registry Compliance Automation (`tests/integration/check_diag_registry.sh`)**
+  - CI script hardening the Task 2.7.1 manual mapping into enforced consistency: (a) every registry/descriptor row binds ≥1 negative-test file; (b) every negative test is run and its emitted diagnostic text compared to the registered text (fail on drift); (c) unreferenced or test-orphaned diagnostic ids fail closed.
+- [ ] **Task 7d.4: ABI & Symbol Freeze Audit (`tests/integration/check_rt_symbols.sh`)**
+  - Golden `llvm-nm` symbol lists for `libveriobjc_rt.a`: exported surface + required *absences* (no libc/malloc, no `objc_msgSend`/runtime dynamic symbols, per the Task 1.2/6.0.3 audit precedent, replacing ad-hoc audits with a committed gate); CI fails closed on any drift; a symbol-surface change requires an explicit task touching the golden and bumping `veriobjc_rt_abi_version`.
+- [ ] **Task 7d.5: Bare-Metal Chapter & Freestanding CI Job**
+  - First-class user documentation (Hare's "Freestanding programs" practice): `docs/writing-for-bare-metal.md` — the `sys0/` hardware layer, `host/` isolation, `@cold` staging, and capability patterns written for *users*, not plan archaeology.
+  - CI job compiling the composed steady-path examples with hosted headers excluded (`-ffreestanding -mno-sse` strictness) so the freestanding story is continuously proven, not asserted.
+- [ ] **Task 7d.6: Stability-Grade CI Guard (optional)**
+  - Lint over `stability.yaml` + includes: a `Stable`/`Frozen`-tier header consuming an `Experimental`-tier symbol fails CI ("no upward vegetables"); ties Task 6.3 report archival into tier-diff reports.
+
+### Block 7e — Computational-Finance Lessons Applied (rides Blocks 7a/7b; source: Antoine Savine, *Modern Computational Finance: AAD and Parallel Simulations*, Wiley 2019 — Ch. 3 parallel C++, Ch. 10 AAD tape memory management, Ch. 13 check-pointing, Ch. 15 expression templates)
+
+*(Rationale: quantitative-finance low-latency practice independently arrived at several of veriObjC's allocator shapes — the book's write-once, mark/rewind, wholesale-wiped tape is functionally the arena + one-store scope reset design — and supplies four concrete, testable additions the kit lacks. Examples exercising these additions live in Block 7b's roadmap; 7e's own acceptance is unit-level tests + ban-corpus rows. All tasks follow the standing red/green + audit-trifecta discipline.)*
+
+- [ ] **Task 7e.1: Pointer-Stable Growable Blocklist (`<vstd/blocklist.h>`)**
+  - Segmented storage (list of fixed-capacity blocks) with three proven invariants from the AAD tape design: appending a block **never relocates** existing elements (pointers/iterators stay valid), no per-element destruction (wholesale wipe with the container), and **O(1) mark/rewind** mirroring `veriobjc_stack` scope marks.
+  - Fills the gap between `veriobjc_stack` (O(1) reset, no growth) and `veriobjc_pool` (fixed slots, no pointer-stable growth); relocation-free backing for the 7a.5 journal and any growable steady-state structure.
+  - Plugin-checked with existing machinery: `ContainerChecks.cpp` verifies capacity ceilings (`BlockSize`, `MaxBlocks`); the Task 2.4.2 escape lattice must reject storing pointers/iterators into a blocklist across a rewind (new ban-corpus rows: `test_banned_blocklist_ptr_across_rewind.m`, `test_banned_blocklist_capacity_overflow.m`; valid: `test_valid_blocklist_grow_mark_rewind.m`).
+  - E2E: grow past several blocks with an all-pointers-survive audit, then mark/rewind + one-store disassembly audit (Task 5.5 pattern).
+- [ ] **Task 7e.2: False-Sharing Discipline (`<vstd/pad.h>` + annotation rule + Phase 4 experiment)**
+  - `valign_cacheline` primitive (documented 64-byte default, target-overridable) plus a compile-time rule: a struct annotated as cross-thread partitioned (via the Task 6.0.4 annotation allowlist) must have its per-thread partitions cache-line padded — mechanically checkable where hand-tuned C++ relies on convention.
+  - Red/green Phase 4 experiment replicating the book's parallel-partitioned-counter postmortem: unpadded vs padded variants through the Task 4.1/4.3 harness, p50/p99/p99.9 artifacts committed ("no number, no claim"); the experiment is the teaching artifact for 7b.
+- [ ] **Task 7e.3: Checkpointed Journal Replay (extends 7a.5)**
+  - Journal marks emit `VOBJ v1` snapshots; the host replay harness supports replay-from-any-checkpoint (O(since mark), not O(full history)); each checkpoint chain (mark → snapshot checksum) verified fail-closed.
+  - New goldens: `fixtures/journal_v1/checkpoint/` (`accept`/`reject`, `.bin` + `.json`); divergence = named diagnostic. Gives the 7b pipeline its strongest demo: rewind the order book to any mark and replay deterministically.
+- [ ] **Task 7e.4: Batch Executor on the Cold Side of the Barrier (`<vstd/batch.h>`)**
+  - The steady path submits work items over SPSC channels; a deliberately OS-blocking worker (condvar/OS waits allowed **only** inside its `@cold @io` quarantined module, Task 6.0.5/2.8.2 precedent) drains and processes, then reports back over a return channel.
+  - Proves the boot→steady barrier operates in both directions and gives the 7b pipeline its realistic topology: hot loop + slow drain thread, no blocking primitives outside quarantine.
+  - Ban-corpus rows: `test_banned_batch_wait_in_steady.m`, `test_banned_batch_submit_blocking.m`; valid: `test_valid_batch_drain_quarantine.m`.
+- [ ] **Task 7e.5: Parallel Determinism by Input Partitioning (extends the 7c.4 design story)**
+  - Parallel workers own disjoint arena storage regions (per-worker `VERIOBJC_SCOPED_STACK` arenas, Task 1.1 pattern) and derive their inputs/randomness from worker index (skip-ahead-seeded generators); zero shared mutable state outside channels/atomics (Task 3.8 enforcement) — parallel results are bit-exact **without locks**.
+  - Evidence written into the 7b.4 memo as a 7c.4 candidate: parallel deterministic replay becomes reachable by construction, not synchronization.
+- [ ] **Task 7e.6 (optional, friction-log-gated): Zero-Temporary Combinators over Spans (`<vstd/expr.h>`)**
+  - Expression-template-inspired map/fill/fold combinators over `vspan`/`vstream`: static dispatch only (no vtables), zero intermediate allocations (escape lattice guarantees span rooting), composable with the Task 3.13 SIMD layer.
+  - **Built only if the 7b friction log shows the pipeline needs it** (no decorative code; Task 3.15 cohesion gate applies).
+
+*(Ordering: Block 7a is independent of Block 6.0 except 7a.6 riding Task 6.1; 7a.1 → 7a.3; 7a.5 feeds 7b.3 — 7e.1 and 7e.3 extend it; Block 7b gates Block 7c per the 7b.4 memo, with 7e.4 supplying the 7b pipeline topology and 7e.5 supplying 7c.4 design evidence; Block 7d is order-independent; the examples' v2 re-baseline (7b.5) follows Phase 8 Blocks 8.1–8.3. Wave-boundary review artifacts apply per the standing process rule.)*
+
+---
+
+## 🧬 Phase 8 (Draft): SMT-Backed Refinement & Index Types (`QF_BV`) — Zero-Runtime-Erasure Dependent-Type Ergonomics
+*(Mapped to: `docs/veriobjc-type-system-and-metaprogramming-vmeta.md` & `compiler/src/SmtContractVerifier.cpp`. Origin: external design proposal, amended in review; sections below preserve the original task structure with inline *(Amendment: …)* design notes.)*
+
+**Decision in review — middle ground only.** Full dependent types (Lean/Rocq-style) are rejected as contradicting four load-bearing design decisions: (1) *no manual proofs* — dependent types make the programmer write proof terms while the compiler merely checks; veriObjC's bet is the inverse (obligations discharge automatically via Z3 or fail closed); (2) *decidability as a boundary* — type-level computation under full dependency needs termination and universe machinery, the opposite of the fuel-bounded, fail-closed-on-the-undecidable pattern (`vconstexpr`, Task 2.5.5) — `QF_BV`'s decidability is what makes "fail closed" meaningful; (3) *mutability* — dependency over in-place mutation forces ownership/borrow machinery into Objective-C; the `Folded`/`Unfolded` discipline (Block 8.2) is the refinement world's answer (Liquid Haskell's substitution/scrutinee shape); (4) *the plugin architecture* — a dependent-type elaborator is a second compiler, not a plugin. Industrial precedent supports the middle ground: Liquid Haskell, SPARK Ada predicate aspects, Dafny, Rust Flux/Refine — SMT discharges obligations silently, with essentially no industrial C-family deployment of full dependent types.
+
+**Siting & gates (amendment):** Phase 8 is a *sibling of the SMT track*, not dependent on Blocks 7a–7c; parts of it precede Phase 7 items. Two hard gates: (1) every refinement diagnostic enters the Task 7d.1 descriptor registry and passes the Task 7d.3 automated compliance gate — this is the largest diagnostic-vocabulary expansion the dialect has taken, and it must be born pre-wired or the dialect spec is stale on arrival; (2) Block 8.0 (reconciliation) runs first so existing special-purpose checks demote onto the refinement machinery instead of doubling enforcement paths.
+
+### Block 8.0 — Reconciliation of Existing Bounds Machinery (amendment; runs first)
+
+- [ ] **Task 8.0.1: Demote or Deduplicate Existing Bounds/Index Checks onto Refinements**
+  - Inventory each special-purpose mechanism as either a refinement-obligation instance or a knowingly kept separate check (rationale filed in the 7d.1 descriptor registry): 7c.3 `// lmax: N` loop bounds (special case: constant range refinements), 7a.4 runloop step-bounds contracts, 7e.1 blocklist index obligations (`i < MaxBlocks * BlockSize`), Task 2.6.1 context caps.
+  - Duplicated enforcement paths for one property are rejected; the survivor is named in the registry.
+
+### Block 8.1 — Scalar & Pointer `QF_BV` Refinement Types (`veriobjc_where`)
+
+- [ ] **Task 8.1.1: Type-Level Refinement Attribute & Expression Parser (`AstBanChecks.cpp` / `SmtContractVerifier.cpp`)**
+    - Register canonical `veriobjc_where("<qf_bv_expr>")` macro/attribute spelling in the `VeriObjCVisitor::VisitDecl` allowlist (extending Block 6.0.4) for `TypedefNameDecl`, `ParmVarDecl`, and `FieldDecl` over scalar integer and pointer carrier types (`uint8_t`–`uint64_t`, `int8_t`–`int64_t`, `size_t`, `uintptr_t`, raw pointers).
+    - Parse `self`-bound predicates (e.g., `self < 4096`, `(self & 7) == 0`, `self >= 8 && self <= 1500`) into the existing `QF_BV` AST/SMT expression builder, rejecting non-`QF_BV` constructs (quantifiers, floats, impure calls) fail-closed with a named diagnostic (`test_banned_refinement_non_qfbv.m`, `valid_objc_refinement_non_qfbv.m`).
+- [ ] **Task 8.1.2: Refinement Propagation Across `auto` & `vgeneric` (`CfgDataflowChecks.cpp` — amended design)**
+    - **Amendment:** implement refinements as *facts in the flow environment* (`Γ` entries in the existing `CfgDataflowChecks.cpp` lattice, alongside `StackScoped`/move state), not as `TypedefType`/`AttributedType` sugar that must survive Clang's `ASTContext` canonicalization. The `veriobjc_where` attribute *seeds* `Γ` at declaration; propagation across `auto` (Task 2.5.7), ternaries, and `vgeneric` specializations (Task 2.5.4) then falls out of ordinary flow tracking rather than fighting canonical-type erasure.
+    - Mutation-invalidation is thereby automatic: reassigning a witness variable re-fires its obligation (`test_valid_refinement_auto_propagation.m`, `test_banned_refinement_witness_mutation.m`).
+- [ ] **Task 8.1.3: Subtyping & Implicit Assignment Discharge via Z3 `QF_BV` (`SmtContractVerifier.cpp`)**
+    - Emit automatic `QF_BV` implication checks (`Γ ∧ P_actual(v) ⇒ P_expected(v)`) at assignment, return, and call-argument boundaries whenever a plain or refined value flows into a refined target type.
+    - Integrate path-sensitive branch assumptions from `clang::CFG` (e.g., `if (idx < cap)`) into `Γ` so checked runtime guards discharge refinement subtyping automatically without redundant casts (`test_valid_refinement_branch_subtyping.m`, `test_banned_refinement_subtyping_violation.m`, `examples/banned/valid_objc_refinement_overflow.m`).
+    - *(Amendment: obligation *budget + memoized discharge* per predicate pair — compile-time scale guard in the Task 2.8.5 mono-budget tradition; discharges are deduplicated so a pathological call graph cannot trigger per-boundary re-proving.)*
+
+### Block 8.2 — Struct Field Refinements & Folded/Unfolded Typestate (`CfgDataflowChecks.cpp`)
+
+- [ ] **Task 8.2.1: Dependent Struct Field Predicates (`FieldDecl` Cross-Field `QF_BV` Invariants)**
+    - Support `veriobjc_where` predicates on `@flat` / `@sealed` struct fields referencing sibling fields declared earlier in the same struct (e.g., `uint32_t cap; uint32_t head __attribute__((veriobjc_where("self < cap")));`).
+    - Enforce structural well-formedness: reject cyclic or forward-referencing field predicates at compile time (`test_banned_refinement_cyclic_field.m`).
+    - *(Amendment: predicates must be layout-order-stable — a field reorder across versions that breaks a sibling predicate is rejected; predicate descriptors record the field order they assume.)*
+- [ ] **Task 8.2.2: `clang::CFG` Folded / Unfolded Struct Mutation Tracking (`CfgDataflowChecks.cpp`)**
+    - Extend the dataflow lattice with `StructInvariantState` (`Folded` vs. `Unfolded(dirty_fields)`) to support imperative multi-field updates without false-positive mid-update failures.
+    - When a refined struct field is mutated, transition the struct variable to `Unfolded`, forbid passing it to functions expecting a `Folded` refined struct, and automatically re-verify all cross-field `QF_BV` predicates at the next sequence/call boundary or scope exit to transition back to `Folded` (`test_valid_struct_field_repack.m`, `test_banned_call_with_unfolded_struct.m`).
+    - *(Amendment: soundness edge named in advance — a `@nolatency` callee must reject `Unfolded` struct arguments even if it does not read refined fields, unless the callee's own contract is discharged; and `Unfolded` recheck volume is bounded by the Task 8.1.3 obligation budget.)*
+
+### Block 8.3 — Ghost Index Types & Dependent Pairs (`vspan<T, n>` / `from_bytes` Erasure)
+
+- [ ] **Task 8.3.1: Ghost Symbolic Length & Alignment Indices (`<vstd/span.h>`, `<vstd/stack.h>`)**
+    - Introduce compile-time ghost index annotations (`veriobjc_index(sym_expr)`) for `vspan` and `vstack_array` views, binding symbolic lengths and alignment guarantees to in-scope integer variables or constants without emitting VLA stack allocations.
+    - Statically discharge `vspan` indexing (`span[i]`), slicing, and `zip` length-equality obligations via `QF_BV` (`i < len`, `lhs.len == rhs.len`), eliminating runtime bounds branches inside `@nolatency` loops (`test_valid_indexed_vspan_zero_bounds.m`, `test_banned_indexed_vspan_oob.m`).
+    - *(Amendment: witness invalidation must be explicit — if the bound variable mutates or escapes scope, the view's obligations re-fire or the view is invalid; handled by the Task 8.1.2 flow environment, with dedicated ban rows for escaped witnesses: `test_banned_index_witness_escape.m`. This is the highest-payoff/lowest-tolerance item: bounds-branch elimination is real p99 money on the `@nolatency` path.)*
+- [ ] **Task 8.3.2: Dependent-Pair (`Σ`-Type) Wire Validation Bridge (`veriobjc_from_bytes`)**
+    - Extend `veriobjc_from_bytes` / `objc_vresult` parser patterns so a single boundary check on raw DMA/VOBJ bytes returns a validated dependent-pair carrier bundling a refined/indexed view (`vspan` with proven `len >= HeaderSize` and alignment) with its symbolic length witness ("parse, don't validate", with the witness carried in a flat carrier).
+    - Audit via `llvm-objdump -d` and `nm` that all `veriobjc_where` predicates and ghost indices erase to zero machine instructions and zero runtime symbols (`examples/refined_market_data_parser.m`, `test_e2e_refinement_zero_overhead.m`).
+
+*(Phase-8 ordering: 8.0 → 8.1 → 8.3; Block 8.2 rides 8.1.2's flow-environment design; 8.3.1's discharge supersedes the reconciled 7c.3/7a.4/7e.1 mechanisms per Block 8.0's registry decision. Gates: Task 7d.1/7d.3 registry compliance for every new diagnostic; Task 7d.2 stability grades for the `veriobjc_where`/`veriobjc_index` attributes; the Task 8.3.2 zero-overhead `llvm-objdump`/`nm` audit is a standing acceptance criterion for the whole phase.)*
