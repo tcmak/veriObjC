@@ -120,6 +120,9 @@ for corpus_file in "$REPO_ROOT"/examples/banned/valid_objc_*.m; do
         valid_objc_isystem_extern_in_nolatency.m)
             EXPECTED_DIAG="defaults to @cold and cannot be called from a @nolatency context"
             ;;
+        valid_objc_clock_cal_in_nolatency.m)
+            EXPECTED_DIAG="@cold function 'do_calibrate' cannot be called from non-@cold function"
+            ;;
         valid_objc_unchecked_vresult.m)
             EXPECTED_DIAG="Unchecked vresult access"
             ;;

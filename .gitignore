@@ -21,3 +21,4 @@ CTestTestfile.cmake
 *~
 *.Zone.Identifier
 *:Zone.Identifier
+default.profraw

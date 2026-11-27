@@ -174,6 +174,7 @@ if(BUILD_TESTING)
         tests/unit_rt/TestLatencyBudgetGate.cpp
         tests/unit_rt/TestSmtContractBridge.cpp
         tests/unit_rt/TestHostIo.cpp
+        tests/unit_rt/TestSys0Time.cpp
     )
 
     target_compile_definitions(unit_rt_tests PRIVATE

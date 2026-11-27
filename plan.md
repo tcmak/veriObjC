@@ -8,7 +8,7 @@ Every implementation step follows strict **Test-Driven Development (TDD: Red ➔
 
 ## 🧭 Progress Dashboard
 
-* **Overall Status:** Phases 0–5 & Block 6.0 Complete (`veriobjc-cc` SDK driver, `@cold` static staging file loader, `-isystem` C99 interop, mixed-size `@sealed` scope composition & real Z3 `QF_BV` SMT contract discharge); **Next Up:** Task 6.0 (`vosh` — Self-Hosted Zero-Boilerplate Scripting & Verification Runner)
+* **Overall Status:** Phases 0–5, Block 6.0 & Task 7a.1 Complete (`veriobjc-cc` SDK driver, `@cold` static staging file loader, `-isystem` C99 interop, mixed-size `@sealed` scope composition, real Z3 `QF_BV` SMT contract discharge, boot calibration & typed clock domains); **Next Up:** Task 7a.2 (Opaque Boot Capability Types)
 * **Compiler Substrate:** Clang / LLVM 23.1.5 (`clang-23`) + Z3 ≥ 4.8.12 (64-bit host prover), split cleanly across `PluginMain.cpp`, `AstBanChecks.cpp`, `CfgDataflowChecks.cpp`, `ContainerChecks.cpp`, `StaticDispatchLowering.cpp`, and `SmtContractVerifier.cpp`
 * **Test Framework:** CppUTest (`CPPUTEST_ROOT`)
 * **Build System:** CMake + Make / Ninja (portable `find_package(LLVM REQUIRED CONFIG)`)
@@ -288,7 +288,7 @@ Real-world external consumer dogfooding and soundness audits surfaced ten usabil
 
 ### Block 7a — Low-Latency Library Kit (zero compiler changes; `<sys0/`, `<vstd/`, `host/`)
 
-- [ ] **Task 7a.1: Boot Calibration & Typed Clock Domains (`<sys0/time.h>`)**
+- [x] **Task 7a.1: Boot Calibration & Typed Clock Domains (`<sys0/time.h>`)**
   - One-time `@cold` calibration pinning the cycles→nanoseconds multiplier/offset at boot; strong types (`vticks`, `vns`, `<vstd/strong.h>` discipline) make cross-clock-domain mixing a compile error; documented drift/resolution contract per platform.
   - All unit tests run on an injected virtual tick source instead of wall time (deterministic under simulation).
 - [ ] **Task 7a.2: Opaque Boot Capability Types (`vcore_set`, `varena_cap`, `vmap_cap`)**
